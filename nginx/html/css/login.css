@@ -65,9 +65,13 @@
   flex: 1;
 }
 
-.code-btn {
-  width: 38%;
-  flex-shrink: 0;
+/* 发送验证码按钮: 按内容自适应宽度, 避免撑满整行
+   (需覆盖 .login-form .el-button 的 width:100%) */
+.login-form .phone-row .code-btn {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 104px;
+  padding: 0 var(--dr-space-4);
   height: 40px !important;
   font-size: var(--dr-font-size-sm) !important;
   background: var(--dr-primary-bg) !important;
