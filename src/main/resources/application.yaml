@@ -5,16 +5,16 @@ spring:
     name: dish-review
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
-    # 【安全修复 Fix 1-2】使用环境变量管理数据库连接信息，避免敏感凭证硬编码和公网暴露
-    # 生产环境通过环境变量或配置中心（如 Nacos）注入，默认值仅用于本地开发
-    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/dish_review?useSSL=false&serverTimezone=UTC
+    # 连接远程部署的 MySQL (115.29.220.133)
+    # 优先读取环境变量，未设置时使用远程服务器默认配置
+    url: jdbc:mysql://${MYSQL_HOST:115.29.220.133}:${MYSQL_PORT:3306}/dish_review?useSSL=false&serverTimezone=UTC
     username: ${MYSQL_USER:root}
-    password: ${MYSQL_PASSWORD:}
+    password: ${MYSQL_PASSWORD:MyStudy@2026_Sql}
   redis:
-    # 【安全修复 Fix 1-2】Redis 连接信息使用环境变量，避免公网暴露和密码硬编码
-    host: ${REDIS_HOST:127.0.0.1}
+    # 连接远程部署的 Redis (115.29.220.133)
+    host: ${REDIS_HOST:115.29.220.133}
     port: ${REDIS_PORT:6379}
-    password: ${REDIS_PASSWORD:}
+    password: ${REDIS_PASSWORD:MyStudy@2026_Sql}
     lettuce:
       pool:
         max-active: 10
