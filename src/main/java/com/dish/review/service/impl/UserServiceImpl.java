@@ -60,10 +60,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     /**
      * 发送手机验证码
-     *
-     * 【安全修复 Fix 6/7】
-     * 1. 增加60秒发送频率限制，防止恶意刷接口
-     * 2. 移除验证码明文日志，仅记录手机号用于审计
+     * 60秒发送频率限制，防止恶意刷接口
      *
      * @param phone   手机号
      * @param session HttpSession
@@ -93,8 +90,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
                 RedisConstants.LOGIN_CODE_TTL, TimeUnit.MINUTES);
 
         // 5. 发送验证码
-        // 【安全修复 Fix 7】生产模式不再将验证码明文记录到日志中，仅记录手机号用于审计
-        // 测试模式（test）下直接返回验证码明文，便于本地联调测试
         if ("prod".equalsIgnoreCase(smsCodeMode)) {
             log.info("已向手机号 {} 发送验证码", phone);
             return Result.ok();
@@ -105,8 +100,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     /**
      * 登录功能
-     *
-     * 【安全修复 Fix 14】支持两种登录方式：
+     * 支持两种登录方式：
      * - 密码登录：当 password 字段非空时，使用密码校验登录
      * - 验证码登录：当 password 字段为空时，使用验证码校验登录
      *
@@ -157,8 +151,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     /**
      * 验证码登录
-     *
-     * 【安全修复 Fix 6】增加验证码尝试次数限制，最多5次，超过后验证码失效需重新获取
+     * 验证码尝试次数限制，最多5次，超过后验证码失效需重新获取
      *
      * @param loginForm 登录表单
      * @param phone     手机号
@@ -204,7 +197,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     /**
      * 登出功能
-     * 【安全修复 Fix 12】从 Redis 中删除用户 Token，使其立即失效
+     * 从 Redis 中删除用户 Token，使其立即失效
      *
      * @param token 用户登录令牌
      * @return 登出结果
