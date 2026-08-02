@@ -137,35 +137,50 @@
   color: var(--dr-primary);
 }
 
-/* 自定义圆形单选按钮 */
-input[type="radio"] + label::before {
+/* 整行可点击, 提升勾选体验 */
+.radio-label {
+  display: flex;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+/* 隐藏原生 radio, 使用自定义圆形 */
+.radio-label input[type="radio"] {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+/* 自定义圆形单选按钮 (圆圈) */
+.radio-label input[type="radio"] + span::before {
   content: "\a0";
   display: inline-block;
   vertical-align: middle;
   font-size: var(--dr-font-size-sm);
   width: 16px;
   height: 16px;
-  margin-right: 6px;
+  margin-right: 8px;
   border-radius: 50%;
   border: 2px solid var(--dr-primary);
   text-indent: 0.15em;
   line-height: 1;
   padding: 2px;
   background-clip: content-box;
+  flex-shrink: 0;
   transition: var(--dr-transition);
 }
 
-input[type="radio"]:checked + label::before {
+/* 选中态: 实心圆点 */
+.radio-label input[type="radio"]:checked + span::before {
   background-color: var(--dr-primary);
   background-clip: content-box;
   padding: 2px;
 }
 
-input[type="radio"] {
-  opacity: 0;
-  width: 0;
-  height: 0;
-  position: absolute;
+/* 键盘可达性: 聚焦时显示光圈 */
+.radio-label input[type="radio"]:focus-visible + span::before {
+  box-shadow: 0 0 0 3px rgba(255, 102, 51, 0.25);
 }
 
 /* 忘记密码链接 */
