@@ -96,7 +96,14 @@
         }
         // 发送验证码
         axios.post("/user/code?phone="+this.form.phone)
-          .then(() => {})
+          .then(({data}) => {
+            // 测试模式下后端会直接返回验证码明文，弹窗提示方便输入
+            if (data && data.data) {
+              this.$message.success("验证码已发送：" + data.data);
+            } else {
+              this.$message.success("验证码已发送");
+            }
+          })
           .catch(err => {
             console.log(err);
             this.$message.error(err)

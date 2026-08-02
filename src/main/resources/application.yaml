@@ -25,6 +25,10 @@ spring:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
 mybatis-plus:
   type-aliases-package: com.dish.review.entity # 别名扫描包
+# 自定义业务配置
+dish-review:
+  # 验证码发送模式: test=测试模式(接口直接返回验证码,便于本地联调) prod=生产模式(接入真实短信通道)
+  sms-code-mode: test
 logging:
   level:
     # 【安全修复】生产环境使用 info 级别，避免 debug 日志泄露敏感信息

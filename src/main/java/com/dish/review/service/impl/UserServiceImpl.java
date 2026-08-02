@@ -18,6 +18,7 @@ import com.dish.review.utils.RegexUtils;
 import com.dish.review.utils.SystemConstants;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -48,6 +49,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     /** 验证码最大尝试次数 */
     private static final int MAX_LOGIN_ATTEMPTS = 5;
+
+    /**
+     * 验证码发送模式（读取配置 dish-review.sms-code-mode）
+     * test: 测试模式，接口直接返回验证码明文，便于本地联调
+     * prod: 生产模式，接入真实短信通道发送
+     */
+    @Value("${dish-review.sms-code-mode:test}")
+    private String smsCodeMode;
 
     /**
      * 发送手机验证码
@@ -84,10 +93,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
                 RedisConstants.LOGIN_CODE_TTL, TimeUnit.MINUTES);
 
         // 5. 发送验证码
-        // 【安全修复 Fix 7】不再将验证码明文记录到日志中，仅记录手机号用于审计
-        log.info("已向手机号 {} 发送验证码", phone);
-
-        return Result.ok();
+        // 【安全修复 Fix 7】生产模式不再将验证码明文记录到日志中，仅记录手机号用于审计
+        // 测试模式（test）下直接返回验证码明文，便于本地联调测试
+        if ("prod".equalsIgnoreCase(smsCodeMode)) {
+            log.info("已向手机号 {} 发送验证码", phone);
+            return Result.ok();
+        }
+        log.info("[测试模式] 手机号 {} 的验证码为 {}", phone, code);
+        return Result.ok(code);
     }
 
     /**
