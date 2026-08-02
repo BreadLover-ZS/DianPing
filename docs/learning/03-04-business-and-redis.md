@@ -1,25 +1,8 @@
 # DishReview 学习文档：阶段 3～4
 
-> 阶段 3：核心业务模块；阶段 4：Redis 在项目中的实际应用。
->
-> 本文承接 [阶段 0～1：项目地图与数据库设计](./00-01-project-map-and-database.md)。阶段 2 的 Spring Boot 基础暂不展开，阅读本文时重点关注“业务为什么这样流转”和“Redis 具体解决了什么问题”。
+## 1.阶段 3：核心业务模块
 
-## 一、学习目标
-
-完成本文后，应能够：
-
-1. 按业务模块说明用户、店铺、博客、优惠券和订单之间的关系。
-2. 从接口入口追踪到数据库写入、Redis 读写和返回结果。
-3. 区分当前项目中已经接入 Redis 的功能和仅定义了常量但尚未接入的功能。
-4. 解释 Redis 中每类 Key 的命名、数据结构、TTL 和使用场景。
-5. 讲清缓存穿透、缓存击穿、逻辑过期、Token 续期、分布式锁和分布式 ID。
-6. 能够指出当前实现的边界和后续优化方向，但不把优化设想说成已经完成的功能。
-
----
-
-## 二、阶段 3：核心业务模块
-
-### 2.1 先看业务边界，而不是先看类名
+### 1.1 业务边界
 
 DishReview 的业务可以分成四层：
 
@@ -44,23 +27,7 @@ DishReview 的业务可以分成四层：
 3. 哪些数据必须落 MySQL，哪些数据适合放 Redis？
 4. 请求失败、重复请求或并发请求时，系统如何保证结果正确？
 
-### 2.2 当前接口与实现状态
-
-| 模块 | 主要接口 | 当前状态 |
-|---|---|---|
-| 用户 | `/user/code`、`/user/login`、`/user/logout`、`/user/me`、`/user/info/{id}` | 已有主要流程 |
-| 店铺 | `/shop/{id}`、`/shop/of/type`、`/shop/of/name`、POST/PUT `/shop` | 已有查询、缓存和写入流程 |
-| 店铺类型 | `/shop-type/list` | 已使用 Redis List 缓存 |
-| 博客 | POST `/blog`、PUT `/blog/like/{id}`、`/blog/of/me`、`/blog/hot` | 有基础发布、点赞和查询流程 |
-| 评论 | `/blog-comments` | Controller 当前基本为空 |
-| 关注 | `/follow` | Controller 和 Service 当前基本为空 |
-| 优惠券 | POST `/voucher`、POST `/voucher/seckill`、`/voucher/list/{shopId}` | 有普通券、秒杀券和店铺券查询 |
-| 秒杀订单 | POST `/voucher-order/seckill/{id}` | 有锁、事务、库存扣减和订单创建流程 |
-| 图片 | POST `/upload/blog`、删除博客图片 | 有类型、大小和路径安全校验 |
-
-面试时要明确区分“表已经存在”“接口已经存在”“业务真正完整实现”这三个层次。例如 `tb_follow` 表和 `FollowService` 已经存在，但当前关注接口并没有形成完整业务闭环。
-
-### 2.3 用户业务：身份、会话和当前用户
+### 1.2 用户业务：身份、会话和当前用户
 
 #### 登录入口
 
@@ -127,7 +94,7 @@ sequenceDiagram
 
 不能把 ThreadLocal 当作全局登录存储，也不能忘记请求完成后清理 ThreadLocal。
 
-### 2.4 店铺业务：高频读与缓存
+### 1.3 店铺业务：高频读与缓存
 
 店铺业务包含三种查询：
 
@@ -135,21 +102,9 @@ sequenceDiagram
 2. 按类型分页查询店铺；
 3. 按名称关键字分页查询店铺。
 
-其中只有店铺详情明确接入了 `CacheClient`。核心流程如下：
+其中只有店铺详情明确接入了 `CacheClient`。
 
-```mermaid
-flowchart TD
-    A[GET /shop/{id}] --> B[查询 cache:shop:{id}]
-    B -->|命中且未逻辑过期| C[反序列化并直接返回]
-    B -->|不存在| D[当前逻辑过期方案返回空]
-    B -->|已逻辑过期| E[尝试 lock:shop:{id}]
-    E -->|抢锁成功| F[异步查 MySQL并重建缓存]
-    E -->|抢锁失败| G[不重建，继续返回旧数据]
-    F --> H[返回旧数据]
-    G --> H
-```
-
-当前 `ShopServiceImpl.queryById()` 选择的是逻辑过期方案；缓存穿透和互斥锁方案仍以注释代码或辅助方法形式保留。因此阅读时不要只看类里存在的方法，要看实际入口最终调用的是哪一个方法。
+当前 `ShopServiceImpl.queryById()` 选择的是逻辑过期方案；缓存穿透和互斥锁方案仍以注释代码或辅助方法形式保留。
 
 #### 店铺更新
 
@@ -163,7 +118,7 @@ PUT /shop
 
 这体现了“修改数据库后删除缓存”的基本策略。它不是严格意义上的分布式一致性方案，后续还需要思考：数据库更新成功但删除缓存失败怎么办？删除缓存成功但事务最终回滚怎么办？
 
-### 2.5 店铺类型业务：Redis List
+### 1.4 店铺类型业务：Redis List
 
 `ShopTypeServiceImpl.queryTypeList()` 的流程：
 
@@ -186,7 +141,7 @@ PUT /shop
 
 这些是后续优化候选，不是本文要求立即修改的内容。
 
-### 2.6 博客业务：内容、点赞和热门列表
+### 1.5 博客业务：内容、点赞和热门列表
 
 #### 发布博客
 
@@ -233,7 +188,7 @@ blogService.update()
 
 这里存在典型的 N+1 查询特征：博客列表有 N 条，就可能额外查询 N 次用户。后续可以学习批量查询、联表查询或缓存用户信息，但在优化前要先理解当前实现和真实数据规模。
 
-### 2.7 优惠券和秒杀业务
+### 1.6 优惠券和秒杀业务
 
 优惠券分成两层：
 
@@ -250,7 +205,7 @@ blogService.update()
 
 这解释了为什么秒杀券表的 `voucher_id` 不能脱离优惠券单独存在。
 
-### 2.8 秒杀下单业务链路
+### 1.7 秒杀下单业务链路
 
 当前秒杀流程是整个项目最适合面试深入讲解的业务：
 
@@ -292,9 +247,9 @@ sequenceDiagram
 
 ---
 
-## 三、阶段 4：Redis 在项目中的实际应用
+## 2.阶段 4：Redis 在项目中的实际应用
 
-### 3.1 Redis 的定位
+### 2.1 Redis 的定位
 
 在当前项目中，Redis 承担四种角色：
 
@@ -305,25 +260,23 @@ sequenceDiagram
 原子计数器：订单序列号
 ```
 
-Redis 并没有替代 MySQL：用户、店铺、博客、优惠券和订单的最终业务数据仍然在 MySQL 中。
+### 2.2 当前实际使用的 Redis Key
 
-### 3.2 当前实际使用的 Redis Key
-
-| Key 模式 | 数据结构 | TTL/生命周期 | 代码位置 | 作用 |
-|---|---|---|---|---|
-| `login:code:{phone}` | String | 2 分钟 | `UserServiceImpl` | 登录验证码 |
-| `login:code:limit:{phone}` | String | 60 秒 | `UserServiceImpl` | 限制验证码发送频率 |
-| `login:code:attempt:{phone}` | String | 2 分钟 | `UserServiceImpl` | 记录错误尝试次数 |
-| `login:token:{token}` | Hash | 30 分钟，访问时续期 | `UserServiceImpl`、拦截器 | 登录用户信息 |
-| `cache:shop:{id}` | String JSON | 物理 TTL 或逻辑过期 | `CacheClient`、`ShopServiceImpl` | 店铺缓存 |
-| `lock:shop:{id}` | String | 约 10 秒 | `CacheClient`、`ShopServiceImpl` | 缓存重建互斥锁 |
-| `lock:order:{userId}` | String | 秒杀代码传入 1200 秒 | `SimpleRedisLock` | 用户下单锁 |
-| `icr:order:{yyyy:MM:dd}` | String | 当前未显式设置 | `RedisIdWorker` | 每日订单序列 |
-| `shopType:typeList` | List JSON | 当前未设置 | `ShopTypeServiceImpl` | 店铺类型列表 |
+| Key 模式                       | 数据结构        | TTL/生命周期      | 代码位置                            | 作用        |
+| ---------------------------- | ----------- | ------------- | ------------------------------- | --------- |
+| `login:code:{phone}`         | String      | 2 分钟          | `UserServiceImpl`               | 登录验证码     |
+| `login:code:limit:{phone}`   | String      | 60 秒          | `UserServiceImpl`               | 限制验证码发送频率 |
+| `login:code:attempt:{phone}` | String      | 2 分钟          | `UserServiceImpl`               | 记录错误尝试次数  |
+| `login:token:{token}`        | Hash        | 30 分钟，访问时续期   | `UserServiceImpl`、拦截器           | 登录用户信息    |
+| `cache:shop:{id}`            | String JSON | 物理 TTL 或逻辑过期  | `CacheClient`、`ShopServiceImpl` | 店铺缓存      |
+| `lock:shop:{id}`             | String      | 约 10 秒        | `CacheClient`、`ShopServiceImpl` | 缓存重建互斥锁   |
+| `lock:order:{userId}`        | String      | 秒杀代码传入 1200 秒 | `SimpleRedisLock`               | 用户下单锁     |
+| `icr:order:{yyyy:MM:dd}`     | String      | 当前未显式设置       | `RedisIdWorker`                 | 每日订单序列    |
+| `shopType:typeList`          | List JSON   | 当前未设置         | `ShopTypeServiceImpl`           | 店铺类型列表    |
 
 当前 Redis Key 命名大体遵循“业务前缀:对象:标识”的形式。这样做的好处是便于定位、批量观察和避免不同业务之间发生 Key 冲突。
 
-### 3.3 Redis String：验证码、锁和计数器
+### 2.3 Redis String：验证码、锁和计数器
 
 String 并不只用于普通字符串，在 Redis 中它还适合承担：
 
@@ -341,26 +294,7 @@ String 并不只用于普通字符串，在 Redis 中它还适合承担：
 订单序列：String -> Redis 自增整数
 ```
 
-### 3.4 验证码限流与尝试次数
-
-发送验证码时：
-
-```java
-stringRedisTemplate.opsForValue()
-        .setIfAbsent(sendLimitKey, "1", 60, TimeUnit.SECONDS);
-```
-
-`setIfAbsent` 对应 Redis 的 SETNX 语义：
-
-- Key 不存在：写入成功，允许发送；
-- Key 已存在：写入失败，拒绝发送；
-- 60 秒后自动过期，允许下一次发送。
-
-验证码校验失败时，代码读取 `login:code:attempt:{phone}`，增加失败次数，并在超过 5 次后删除验证码。这样同时限制了发送频率和猜码次数。
-
-需要注意：当前测试模式会把验证码直接返回给客户端，这是为了本地联调，不应作为生产模式的安全实现。
-
-### 3.5 Token Hash 与滑动过期
+### 2.4 Token Hash 与滑动过期
 
 登录成功后，用户信息以 Hash 保存：
 
@@ -382,7 +316,7 @@ TTL: 30 分钟
 
 为什么使用 Hash 而不是把整个对象保存成一个 JSON String？Hash 可以按字段存取，且便于保存用户的多个属性；但它也要求序列化和反序列化规则稳定，字段变化时要注意兼容性。
 
-### 3.6 店铺缓存与缓存穿透
+### 2.5 店铺缓存与缓存穿透
 
 #### 缓存穿透
 
@@ -405,9 +339,7 @@ TTL: 30 分钟
 
 空值缓存可以阻断短时间内对同一个不存在 ID 的重复查询，但要注意空值 TTL 不能过长，否则新数据创建后可能在一段时间内仍被判断为不存在。
 
-当前 `ShopServiceImpl.queryById()` 实际使用的是逻辑过期方法，并没有直接调用 `queryWithPassThrough()`。这是阅读代码时必须注意的“辅助方案存在，但入口未启用”问题。
-
-### 3.7 缓存击穿与互斥锁
+### 2.6 缓存击穿与互斥锁
 
 缓存击穿是某个热点 Key 过期的瞬间，大量请求同时访问数据库：
 
@@ -448,24 +380,12 @@ setIfAbsent(lockKey, "1", 10, TimeUnit.SECONDS)
 读取时：
 
 - 未过期：直接返回；
-- 已过期：抢锁异步重建，并先返回旧数据；
+- 已过期：抢锁异步重建（开启独立线程，实现缓存重建），并先返回旧数据；
 - 没抢到锁：直接返回旧数据。
 
 优点：热点请求不需要等待数据库重建，吞吐量更稳定。
 
 缺点：可能短时间返回旧数据；必须确保缓存曾经被预热；重建失败时需要有监控或补偿机制。
-
-### 3.8 当前逻辑过期实现中的阅读重点
-
-当前代码有几个值得重点理解和记录的问题：
-
-1. `CacheClient.setWithLogicalExpire()` 使用 `unit.toSeconds(time)` 计算逻辑过期时间；
-2. `ShopServiceImpl.saveShop2Redis()` 的参数名是 `expireSeconds`，但内部使用 `plusMinutes(expireSeconds)`；
-3. `ShopServiceImpl` 调用 `saveShop2Redis(id, 1000L)`，实际过期单位需要结合代码确认，不能只看参数名；
-4. 缓存重建线程池是固定 10 个线程，当前没有看到关闭、队列容量或失败重试策略；
-5. `CacheClient` 的店铺锁和 `ShopServiceImpl` 的店铺锁释放方式是直接删除 Key，没有校验锁持有者。
-
-这些不是本阶段要求立刻修复的 Bug 清单，而是你后续进行代码审查和优化时需要先验证的事实。
 
 ### 3.9 分布式锁：SimpleRedisLock
 
@@ -534,13 +454,13 @@ USER_SIGN_KEY
 
 当前阅读仓库时，不应仅凭这些常量判断功能已经完成。它们更像是后续功能的设计入口：
 
-| 预留 Key | 未来可能对应的 Redis 结构 | 需要学习的问题 |
-|---|---|---|
-| 秒杀库存 | String | 如何预扣库存，如何与 MySQL 最终库存一致 |
-| 博客点赞 | Set | 如何判断用户是否点过赞，如何处理取消点赞 |
-| Feed | ZSet/List | 如何按时间拉取关注用户动态，如何做分页 |
-| 商铺 GEO | GEO | 如何按经纬度搜索附近店铺 |
-| 用户签到 | Bitmap | 如何按日期记录和统计签到 |
+| 预留 Key | 未来可能对应的 Redis 结构 | 需要学习的问题                 |
+| ------ | ---------------- | ----------------------- |
+| 秒杀库存   | String           | 如何预扣库存，如何与 MySQL 最终库存一致 |
+| 博客点赞   | Set              | 如何判断用户是否点过赞，如何处理取消点赞    |
+| Feed   | ZSet/List        | 如何按时间拉取关注用户动态，如何做分页     |
+| 商铺 GEO | GEO              | 如何按经纬度搜索附近店铺            |
+| 用户签到   | Bitmap           | 如何按日期记录和统计签到            |
 
 这些内容属于后续完善方向，不应在当前项目介绍中包装成已实现能力。
 
