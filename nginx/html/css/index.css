@@ -1,92 +1,239 @@
-/*搜索框*/
-.search-bar{
-    background-color: #ff6633;
-    color: white;
-    display: flex;
-    justify-content: space-around;
-    height: 7%;
-    align-items: center;
-    padding: 0 8px;
-}
-.header-icon{
-    /*width: 2%;*/
-    font-size: 14px;
-}
-.search-input{
-    width: 70%;
-}
-.type-list {
-    height: 25%;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-around;
-    box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
-}
-.type-box{
-    width: 17%;
-    text-align: center;
-}
-.type-box img {
-    width: 100%;
-}
-.type-text{
-    color: #111;
-    font-size: 10px;
-    margin-top: -8px;
-    margin-bottom: 10px;
+/* ==========================================================================
+   DishReview 首页样式
+   采用设计令牌(见 main.css :root), 提升视觉层次与交互体验
+   ========================================================================== */
+
+/* ---------- 1. 顶部搜索栏 ---------- */
+.search-bar {
+  background: var(--dr-gradient);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+  padding: 0 14px;
+  box-shadow: 0 4px 16px rgba(255, 102, 51, 0.3);
+  position: relative;
+  z-index: 10;
 }
 
-/*达人探店列表*/
+/* 城市选择 */
+.city-btn {
+  font-size: var(--dr-font-size-md);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: var(--dr-radius-full);
+  background: rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  transition: var(--dr-transition);
+  white-space: nowrap;
+}
+
+.city-btn:active {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 搜索输入框 */
+.search-input {
+  flex: 1;
+  margin: 0 10px;
+}
+
+.search-input .el-input__inner {
+  background-color: rgba(255, 255, 255, 0.95);
+  border: none;
+  border-radius: var(--dr-radius-full) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.header-icon {
+  font-size: 22px;
+  padding: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  transition: var(--dr-transition);
+}
+
+.header-icon:active {
+  transform: scale(0.9);
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* ---------- 2. 分类宫格 ---------- */
+.type-list {
+  display: flex;
+  flex-wrap: wrap;
+  background-color: var(--dr-card-bg);
+  padding: var(--dr-space-4) var(--dr-space-2);
+  box-shadow: var(--dr-shadow-sm);
+}
+
+.type-box {
+  width: 20%;
+  text-align: center;
+  margin-bottom: var(--dr-space-3);
+  cursor: pointer;
+  transition: var(--dr-transition);
+}
+
+.type-box:active {
+  transform: scale(0.9);
+}
+
+/* 分类图标: 圆形底 + 图标, 提升亲和力 */
+.type-view {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: var(--dr-primary-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: var(--dr-transition);
+}
+
+.type-box:active .type-view {
+  background: var(--dr-primary-bg);
+}
+
+.type-view img {
+  width: 60%;
+  height: 60%;
+  object-fit: contain;
+}
+
+.type-text {
+  color: var(--dr-text-2);
+  font-size: var(--dr-font-size-sm);
+  margin-top: var(--dr-space-2);
+  font-weight: 500;
+}
+
+/* ---------- 3. 达人探店笔记瀑布流 ---------- */
+/* 使用 flex 纵向布局: 搜索栏/分类固定, 笔记区自适应填充剩余空间 */
+#app {
+  display: flex;
+  flex-direction: column;
+}
+
 .blog-list {
-    background-color: #eee;
-    width: 100%;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-around;
-    height: 60%;
-    overflow-y: auto;
+  background-color: var(--dr-bg);
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-content: flex-start;
+  padding: var(--dr-space-2);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
-.blog-box{
-    width: 48%;
-    background-color: #fff;
-    margin: 5px 0;
-    box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1);
-    border-radius: 3px;
+
+.blog-box {
+  width: 48.5%;
+  background-color: var(--dr-card-bg);
+  margin-bottom: var(--dr-space-3);
+  box-shadow: var(--dr-shadow-sm);
+  border-radius: var(--dr-radius-md);
+  overflow: hidden;
+  transition: var(--dr-transition);
 }
-.blog-img img{
-    width: 100%;
-    border-radius: 3px;
+
+.blog-box:active {
+  transform: scale(0.98);
+  box-shadow: var(--dr-shadow-md);
 }
+
+/* 图片区: 圆角 + 固定宽高比, 避免布局抖动 */
+.blog-img {
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  position: relative;
+  background: var(--dr-primary-bg);
+}
+
+.blog-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.4s ease;
+}
+
+.blog-box:active .blog-img img {
+  transform: scale(1.05);
+}
+
 .blog-title {
-    padding: 2px 10px;
-    height: 36px;
-    width: 92%;
-    overflow: hidden;
+  padding: var(--dr-space-2) var(--dr-space-3);
+  font-size: var(--dr-font-size-md);
+  font-weight: 500;
+  color: var(--dr-text-1);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+  height: 40px;
 }
+
 .blog-foot {
-    display: flex;
-    justify-content: space-between;
-    margin: 10px 0 5px 0;
-    padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--dr-space-2) var(--dr-space-3) var(--dr-space-3);
 }
+
 .blog-user-icon {
-    width: 10%;
-    margin-right: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  margin-right: 6px;
 }
+
+.blog-user-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .blog-user-name {
-    width: 65%;
-    overflow: hidden;
+  flex: 1;
+  font-size: var(--dr-font-size-sm);
+  color: var(--dr-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
 }
-.blog-user-icon img{
-    width: 100%;
-}
+
+/* 点赞按钮: 整体可点区域 */
 .blog-liked {
-    width: 25%;
-    display: flex;
-    justify-content: flex-end;
+  display: flex;
+  align-items: center;
+  font-size: var(--dr-font-size-sm);
+  color: var(--dr-text-3);
+  cursor: pointer;
+  gap: 3px;
+  padding: 4px 6px;
+  border-radius: var(--dr-radius-full);
+  transition: var(--dr-transition);
 }
-.blog-liked img{
-    width: 30%;
-    height: 75%;
-    margin-right: 2px;
+
+.blog-liked:active {
+  transform: scale(1.15);
+}
+
+.blog-liked svg {
+  transition: var(--dr-transition);
 }

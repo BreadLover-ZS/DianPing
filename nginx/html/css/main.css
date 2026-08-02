@@ -1,59 +1,317 @@
+/* ==========================================================================
+   DishReview 设计系统 - 全局基础样式
+   ==========================================================================
+   设计令牌 (Design Tokens):
+   - 主色: 温暖的珊瑚橙 (#ff6633), 体现餐饮平台的活力与食欲感
+   - 辅助色: 渐变珊瑚、评分橙、语义色(成功/警示/错误)
+   - 排版: 基于 12px 基准字号, 使用系统字体栈保证跨平台一致性
+   - 圆角: 大圆角 (12-16px) 营造现代、亲和的产品气质
+   - 阴影: 分层阴影体系 (低/中/高) 建立清晰的视觉层级
+   ========================================================================== */
+
+/* ---------- 1. CSS 变量 (设计令牌) ---------- */
+:root {
+  /* 色彩 - 主色系 */
+  --dr-primary: #ff6633;
+  --dr-primary-dark: #e8552a;
+  --dr-primary-light: #ff8a5c;
+  --dr-primary-bg: #fff5f0;
+  --dr-gradient: linear-gradient(135deg, #ff6633 0%, #ff9a5c 100%);
+
+  /* 色彩 - 中性色系 */
+  --dr-bg: #f5f6f8;            /* 页面背景 */
+  --dr-card-bg: #ffffff;       /* 卡片背景 */
+  --dr-text-1: #1f2329;        /* 主文本 */
+  --dr-text-2: #4e5969;        /* 次级文本 */
+  --dr-text-3: #86909c;        /* 弱文本 */
+  --dr-border: #e5e6eb;        /* 边框 */
+  --dr-divider: #f2f3f5;       /* 分割线 */
+
+  /* 色彩 - 语义色 */
+  --dr-success: #00b42a;
+  --dr-warning: #ff7d00;
+  --dr-error: #f53f3f;
+  --dr-star: #ffb400;
+
+  /* 排版 */
+  --dr-font-size-xs: 10px;
+  --dr-font-size-sm: 12px;
+  --dr-font-size-md: 14px;
+  --dr-font-size-lg: 16px;
+  --dr-font-size-xl: 18px;
+  --dr-font-size-xxl: 20px;
+  --dr-line-height: 1.5;
+
+  /* 圆角 */
+  --dr-radius-sm: 6px;
+  --dr-radius-md: 10px;
+  --dr-radius-lg: 14px;
+  --dr-radius-full: 999px;
+
+  /* 阴影 - 分层 */
+  --dr-shadow-sm: 0 1px 2px rgba(31, 35, 41, 0.06);
+  --dr-shadow-md: 0 2px 8px rgba(31, 35, 41, 0.08);
+  --dr-shadow-lg: 0 8px 24px rgba(31, 35, 41, 0.12);
+
+  /* 间距 */
+  --dr-space-1: 4px;
+  --dr-space-2: 8px;
+  --dr-space-3: 12px;
+  --dr-space-4: 16px;
+  --dr-space-5: 20px;
+  --dr-space-6: 24px;
+
+  /* 过渡 */
+  --dr-transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---------- 2. 基础重置 ---------- */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
 html {
-    font-size: 12px;
-    width: 100%;
-}
-body{
-    margin: 0;
-}
-html,body,#app{
-    height: 100%;
+  font-size: 12px;
+  width: 100%;
+  -webkit-text-size-adjust: 100%;
 }
 
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: var(--dr-font-size-md);
+  line-height: var(--dr-line-height);
+  color: var(--dr-text-1);
+  background-color: var(--dr-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body, #app {
+  height: 100%;
+}
+
+a {
+  color: var(--dr-primary);
+  text-decoration: none;
+  transition: var(--dr-transition);
+}
+
+a:hover {
+  color: var(--dr-primary-dark);
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+/* ---------- 3. Element UI 主题覆盖 ---------- */
 .el-tabs__item {
-    font-size: 14px;
-    font-weight: bold;
+  font-size: var(--dr-font-size-md);
+  font-weight: 500;
+  transition: var(--dr-transition);
 }
+
+.el-tabs__item.is-active {
+  font-weight: 600;
+  color: var(--dr-primary);
+}
+
 .el-tabs__active-bar {
-    height: 4px;
-    background-image: linear-gradient(to right, #F63, #f5b9a2);
-}
-.foot {
-    width: 100%;
-    height: 8%;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    box-shadow: 0 -1px 2px 1px rgba(0, 0, 0, 0.1);
-    position: absolute;
-    bottom: 0;
-}
-.foot .add-btn {
-    width: 38px;
-    height: 38px;
-    box-shadow: 0 0 3px 2px rgba(0, 0, 0, 0.1);
-    border-radius: 18px;
-}
-.foot-box{
-    width: 20%;
-    color: #82848a;
-    text-align: center;
-}
-.foot-view {
-    font-size: 26px;
-}
-.foot-text{
-    font-size: 8px;
-    margin-top: -4px;
-}
-.foot-text, .foot-view{
-    text-align: center;
-}
-.active{
-    color: #ff6633;
+  height: 3px;
+  border-radius: 2px;
+  background-image: var(--dr-gradient);
 }
 
-/*element-ui的评价星星间隙*/
+/* 输入框圆角与焦点态 */
+.el-input__inner {
+  border-radius: var(--dr-radius-md) !important;
+  border-color: var(--dr-border);
+  transition: var(--dr-transition);
+}
+
+.el-input__inner:focus {
+  border-color: var(--dr-primary) !important;
+  box-shadow: 0 0 0 3px rgba(255, 102, 51, 0.12);
+}
+
+.el-input__inner:hover {
+  border-color: var(--dr-primary-light);
+}
+
+/* 按钮主题 */
+.el-button {
+  border-radius: var(--dr-radius-md);
+  transition: var(--dr-transition);
+}
+
+.el-button--primary {
+  background-color: var(--dr-primary);
+  border-color: var(--dr-primary);
+}
+
+.el-button--primary:hover,
+.el-button--primary:focus {
+  background-color: var(--dr-primary-light);
+  border-color: var(--dr-primary-light);
+}
+
+/* element-ui 的评价星星间隙 */
 .el-rate__icon {
-    margin-right: 0;
+  margin-right: 0;
 }
 
+/* ---------- 4. 底部导航栏 (foot-bar) ---------- */
+.foot {
+  width: 100%;
+  height: 60px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: var(--dr-card-bg);
+  box-shadow: 0 -2px 12px rgba(31, 35, 41, 0.08);
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  z-index: 100;
+  border-top: 1px solid var(--dr-divider);
+}
+
+.foot .add-btn {
+  width: 44px;
+  height: 44px;
+  box-shadow: 0 4px 12px rgba(255, 102, 51, 0.4);
+  border-radius: 50%;
+  margin-top: -20px;
+  background: var(--dr-gradient);
+  border: 3px solid var(--dr-card-bg);
+  transition: var(--dr-transition);
+}
+
+.foot .add-btn:active {
+  transform: scale(0.92);
+}
+
+.foot-box {
+  width: 20%;
+  color: var(--dr-text-3);
+  text-align: center;
+  cursor: pointer;
+  transition: var(--dr-transition);
+}
+
+.foot-box:active {
+  transform: scale(0.92);
+}
+
+.foot-view {
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.foot-text {
+  font-size: var(--dr-font-size-xs);
+  margin-top: 2px;
+}
+
+.foot-text, .foot-view {
+  text-align: center;
+}
+
+.foot-box.active {
+  color: var(--dr-primary);
+}
+
+/* ---------- 5. 通用页面头部 ---------- */
+.header {
+  width: 100%;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--dr-card-bg);
+  border-bottom: 1px solid var(--dr-divider);
+  position: relative;
+}
+
+.header-back-btn {
+  width: 48px;
+  color: var(--dr-text-1);
+  font-size: 24px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.header-title {
+  flex: 1;
+  text-align: center;
+  font-size: var(--dr-font-size-lg);
+  font-weight: 600;
+  color: var(--dr-text-1);
+}
+
+.header-search, .header-share {
+  width: 48px;
+  text-align: center;
+  font-size: var(--dr-font-size-lg);
+  color: var(--dr-text-2);
+}
+
+/* ---------- 6. 工具类 ---------- */
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-ellipsis-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card {
+  background-color: var(--dr-card-bg);
+  border-radius: var(--dr-radius-lg);
+  box-shadow: var(--dr-shadow-sm);
+}
+
+/* ---------- 7. 响应式适配 ---------- */
+/* 小屏手机 (< 375px) 紧凑适配 */
+@media (max-width: 374px) {
+  html { font-size: 11px; }
+  .header { height: 50px; }
+  .foot { height: 54px; }
+}
+
+/* 平板及桌面端: 居中限宽, 避免内容过宽影响可读性 */
+@media (min-width: 768px) {
+  #app {
+    max-width: 480px;
+    margin: 0 auto;
+    box-shadow: 0 0 32px rgba(31, 35, 41, 0.08);
+    background-color: var(--dr-bg);
+  }
+  .foot {
+    max-width: 480px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .header {
+    max-width: 480px;
+  }
+}
+
+/* 尊重系统减弱动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

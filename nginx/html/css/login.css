@@ -1,63 +1,174 @@
-.login-container{
-    height: 100%;
-}
-.header{
-    width: 100%;
-    height: 7%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 2px solid #ff6633;
-}
-.header-back-btn{
-    width: 10%;
-    color: #ff6633;
-    font-size: 22px;
-}
-.header-title {
-    width: 90%;
-    text-align: center;
-    font-size: 18px;
-    font-family: Hiragino Sans GB,Arial,Helvetica,"\5B8B\4F53",sans-serif;
+/* ==========================================================================
+   DishReview 登录页样式
+   ========================================================================== */
+
+.login-container {
+  height: 100%;
+  background: var(--dr-card-bg);
 }
 
-.content{
-    height: 93%;
-    background-color: #f7f5f5;
-    padding: 10px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
+.header {
+  background-color: var(--dr-card-bg);
+  border-bottom: 1px solid var(--dr-divider);
+}
+
+.header-back-btn {
+  color: var(--dr-text-1);
+}
+
+/* 登录表单区域: 居中布局, 突出表单 */
+.content {
+  min-height: calc(100% - 56px);
+  background-color: var(--dr-card-bg);
+  padding: var(--dr-space-6);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .login-form {
-    height: 85%;
+  flex: 1;
+  padding-top: var(--dr-space-6);
 }
+
+/* 表单间距统一 */
+.login-form .el-input,
+.login-form .el-button {
+  margin-bottom: var(--dr-space-3);
+}
+
+.login-form .el-button {
+  width: 100%;
+  height: 46px;
+  font-size: var(--dr-font-size-lg);
+  border: none;
+  border-radius: var(--dr-radius-full) !important;
+  background: var(--dr-gradient) !important;
+  box-shadow: 0 4px 16px rgba(255, 102, 51, 0.35);
+  transition: var(--dr-transition);
+}
+
+.login-form .el-button:active {
+  transform: scale(0.97);
+  box-shadow: 0 2px 8px rgba(255, 102, 51, 0.3);
+}
+
+/* 手机号 + 验证码按钮行 */
+.phone-row {
+  display: flex;
+  align-items: center;
+  gap: var(--dr-space-3);
+  margin-bottom: var(--dr-space-3);
+}
+
+.phone-input {
+  flex: 1;
+}
+
+.code-btn {
+  width: 38%;
+  flex-shrink: 0;
+  height: 40px !important;
+  font-size: var(--dr-font-size-sm) !important;
+  background: var(--dr-primary-bg) !important;
+  color: var(--dr-primary) !important;
+  border: 1px solid #ffd8cc !important;
+  box-shadow: none !important;
+  margin-bottom: 0 !important;
+}
+
+.code-btn.is-disabled {
+  background: #f2f3f5 !important;
+  color: var(--dr-text-3) !important;
+  border-color: var(--dr-border) !important;
+}
+
+/* 登录主按钮 */
+.login-btn {
+  height: 48px !important;
+  font-size: var(--dr-font-size-lg) !important;
+  letter-spacing: 4px;
+}
+
+/* 发送验证码按钮 */
+.login-form .el-button--success {
+  background: var(--dr-primary-bg) !important;
+  color: var(--dr-primary) !important;
+  border: 1px solid #ffd8cc !important;
+  box-shadow: none;
+  font-size: var(--dr-font-size-sm);
+  height: 40px;
+}
+
+.login-form .el-button--success.is-disabled {
+  background: #f2f3f5 !important;
+  color: var(--dr-text-3) !important;
+  border-color: var(--dr-border) !important;
+}
+
+/* 提示文字 */
+.login-tip {
+  text-align: center;
+  color: var(--dr-text-3);
+  font-size: var(--dr-font-size-sm);
+  margin: var(--dr-space-3) 0;
+}
+
+/* 切换登录方式 */
+.login-switch {
+  text-align: right;
+  color: var(--dr-text-2);
+  margin: var(--dr-space-3) 0;
+  font-size: var(--dr-font-size-md);
+}
+
+/* ---------- 协议勾选 ---------- */
 .login-radio {
-    height: 15%;
-    width: 100%;
-    display: flex;
-    align-items: start;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  padding: var(--dr-space-4) 0;
+  font-size: var(--dr-font-size-sm);
+  color: var(--dr-text-3);
+  line-height: 1.6;
 }
+
+.login-radio a {
+  color: var(--dr-primary);
+}
+
+/* 自定义圆形单选按钮 */
 input[type="radio"] + label::before {
-    content: "\a0"; /*不换行空格*/
-    display: inline-block;
-    vertical-align: middle;
-    font-size: 12px;
-    width: 0.7em;
-    height: 0.7em;
-    margin-right: .4em;
-    border-radius: 50%;
-    border: 2px solid #F63;
-    text-indent: .15em;
-    line-height: 1; 
-    padding: .2em;
+  content: "\a0";
+  display: inline-block;
+  vertical-align: middle;
+  font-size: var(--dr-font-size-sm);
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  border-radius: 50%;
+  border: 2px solid var(--dr-primary);
+  text-indent: 0.15em;
+  line-height: 1;
+  padding: 2px;
+  background-clip: content-box;
+  transition: var(--dr-transition);
 }
+
 input[type="radio"]:checked + label::before {
-    background-color: #F63;
-    background-clip: content-box;
-    padding: .2em;
+  background-color: var(--dr-primary);
+  background-clip: content-box;
+  padding: 2px;
 }
+
 input[type="radio"] {
-    opacity: 0;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+/* 忘记密码链接 */
+.forgot-password {
+  color: var(--dr-text-3);
 }

@@ -1,320 +1,403 @@
+/* ==========================================================================
+   DishReview 店铺详情页样式
+   ========================================================================== */
 
 .header {
-    background-color: #fff;
+  background-color: var(--dr-card-bg);
+  border-bottom: 1px solid var(--dr-divider);
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 500;
 }
 
 .top-bar {
-    height: 60px;
+  height: 56px;
 }
 
-.header {
-    width: 100%;
-    line-height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 2px solid #ff6633;
-    position: fixed;
-    top: 0;
-    z-index: 500;
-}
-
-.header-back-btn {
-    width: 10%;
-    color: #ff6633;
-    font-size: 24px;
-    font-weight: bold;
-}
-
-.header-title {
-    width: 80%;
-    text-align: center;
-    font-size: 18px;
-    font-family: Hiragino Sans GB, Arial, Helvetica, "\5B8B\4F53", sans-serif;
-}
-
-.header-share {
-    width: 10%;
-    text-align: center;
-    font-size: 18px;
-    color: #82848a;
-    font-weight: bold;
-    font-family: Hiragino Sans GB, Arial, Helvetica, "\5B8B\4F53", sans-serif;
-}
-
+/* ---------- 1. 店铺基本信息 ---------- */
 .shop-title {
-    font-size: 20px;
-    font-weight: bold;
-    margin: 5px 0;
+  font-size: var(--dr-font-size-xxl);
+  font-weight: 700;
+  color: var(--dr-text-1);
+  margin: var(--dr-space-3) 0 var(--dr-space-2);
 }
 
 .shop-rate {
-    margin: 5px 0;
-    display: flex;
-    justify-content: space-between;
+  margin: var(--dr-space-2) 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .shop-rate-info {
-    margin: 5px 0;
-    color: #82848a;
+  margin: var(--dr-space-2) 0;
+  color: var(--dr-text-3);
+  font-size: var(--dr-font-size-sm);
 }
 
 .shop-info-box {
-    padding: 0 10px;
+  padding: var(--dr-space-4);
+  background-color: var(--dr-card-bg);
 }
 
+/* 榜单: 胶囊标签 */
 .shop-rank {
-    margin: 5px 0;
-    display: flex;
-    width: 100%;
+  margin: var(--dr-space-2) 0;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: var(--dr-space-2);
+}
+
+.shop-rank img {
+  flex-shrink: 0;
 }
 
 .shop-rank span {
-    color: #B15E2C;
-    font-size: 11px;
-    background: linear-gradient(
-            -248deg, #FFEBCF 2%, #FFECDD 61%);
-    border-radius: 1px;
-    height: 20px;
-    line-height: 20px;
-    padding: 0 6px;
+  color: #B15E2C;
+  font-size: var(--dr-font-size-sm);
+  background: linear-gradient(-248deg, #FFEBCF 2%, #FFECDD 61%);
+  border-radius: var(--dr-radius-full);
+  height: 24px;
+  line-height: 24px;
+  padding: 0 10px;
+  font-weight: 500;
 }
 
 .shop-rank div {
-    color: #5a5b5b;
-    font-size: 14px;
-    width: 45%;
-    text-align: end;
+  color: var(--dr-text-3);
+  font-size: var(--dr-font-size-md);
+  flex: 1;
+  text-align: end;
 }
 
+/* 店铺图片墙: 滑动展示 */
 .shop-images {
-    display: flex;
-    overflow-x: scroll;
-    padding: 5px 0;
+  display: flex;
+  overflow-x: auto;
+  padding: var(--dr-space-3) 0;
+  gap: var(--dr-space-2);
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.shop-images::-webkit-scrollbar {
+  display: none;
 }
 
 .shop-images img {
-    height: 106px;
-    width: 145px;
-    margin-right: 3px;
-    display: inline-block;
-    border-radius: 7px;
-    border: 1px solid #e1e1e1;
+  height: 110px;
+  width: 150px;
+  object-fit: cover;
+  border-radius: var(--dr-radius-md);
+  flex-shrink: 0;
 }
 
 .shop-address {
-    font-size: 14px;
-    color: #82848a;
-    height: 42px;
-    display: flex;
-    align-items: center;
-    padding: 5px 0;
+  font-size: var(--dr-font-size-md);
+  color: var(--dr-text-2);
+  display: flex;
+  align-items: center;
+  padding: var(--dr-space-2) 0;
+}
+
+.shop-address i {
+  color: var(--dr-primary);
+  margin-right: var(--dr-space-1);
 }
 
 .shop-divider {
-    height: 10px;
-    background-color: #f3f1f1;
+  height: 10px;
+  background-color: var(--dr-bg);
 }
 
+/* ---------- 2. 营业时间 ---------- */
 .shop-open-time {
-    display: flex;
-    padding: 10px;
-    font-size: 14px;
+  display: flex;
+  align-items: center;
+  padding: var(--dr-space-4);
+  font-size: var(--dr-font-size-md);
+  background-color: var(--dr-card-bg);
+}
+
+.shop-open-time span:first-child {
+  color: var(--dr-primary);
+  margin-right: var(--dr-space-2);
 }
 
 .shop-open-time div {
-    margin-right: 10px;
+  margin-right: var(--dr-space-2);
+  color: var(--dr-text-1);
+}
+
+.shop-open-time div:nth-child(2) {
+  font-weight: 600;
 }
 
 .line-right {
-    width: 40px;
-    flex-grow: 1;
-    color: #82848a;
-    font-size: 12px;
-    text-align: right;
+  flex: 1;
+  color: var(--dr-text-3);
+  font-size: var(--dr-font-size-sm);
+  text-align: right;
 }
 
+/* ---------- 3. 优惠券 ---------- */
 .shop-voucher {
-    padding: 10px;
+  padding: var(--dr-space-4);
+  background-color: var(--dr-card-bg);
 }
 
 .voucher-icon {
-    display: inline-block;
-    line-height: 16px;
-    background-color: #f5a966;
-    color: white;
-    padding: 0 4px 2px 4px;
+  display: inline-block;
+  line-height: 18px;
+  background: var(--dr-gradient);
+  color: #fff;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-weight: 600;
 }
 
 .voucher-box {
-    background-color: #fff1f1;
-    border-radius: 5px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 5px;
-    margin: 10px 0;
+  background-color: #fff8f6;
+  border: 1px solid #ffe4db;
+  border-radius: var(--dr-radius-md);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--dr-space-3);
+  margin: var(--dr-space-3) 0;
+  position: relative;
 }
 
+/* 券面锯齿效果 */
 .voucher-circle {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-around;
-    height: 80px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  height: 80px;
+  flex-shrink: 0;
 }
 
-.voucher-b{
-    height: 10px;
-    width: 10px;
-    background-color: #fff;
-    border-radius: 50%;
+.voucher-b {
+  height: 12px;
+  width: 12px;
+  background-color: #fff8f6;
+  border-radius: 50%;
+  border: 1px solid #ffe4db;
 }
 
 .voucher-left {
-    flex-grow: 1;
-    margin-left: 15px;
+  flex-grow: 1;
+  margin-left: var(--dr-space-3);
+  min-width: 0;
 }
 
 .voucher-right {
-    margin-right: 15px;
+  margin-right: var(--dr-space-2);
+  flex-shrink: 0;
 }
 
 .voucher-title, .voucher-subtitle, .voucher-price {
-    padding: 5px 0;
+  padding: 3px 0;
 }
 
 .voucher-title {
-    font-weight: bold;
+  font-weight: 600;
+  color: var(--dr-text-1);
+  font-size: var(--dr-font-size-md);
 }
 
 .voucher-subtitle {
-    color: #82848a;
+  color: var(--dr-text-3);
+  font-size: var(--dr-font-size-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .voucher-price {
-    color: #F63;
-    display: flex;
-    align-items: center;
+  color: var(--dr-primary);
+  display: flex;
+  align-items: center;
 }
 
 .voucher-price div {
-    font-weight: bold;
-    font-size: 14px;
+  font-weight: 700;
+  font-size: var(--dr-font-size-lg);
 }
 
 .voucher-price span {
-    margin-left: 10px;
-    font-size: 10px;
-    padding: 0 5px;
-    line-height: 10px;
-    background-color: #fce5e5;
+  margin-left: 10px;
+  font-size: var(--dr-font-size-xs);
+  padding: 1px 6px;
+  background-color: #ffe4db;
+  color: var(--dr-primary);
+  border-radius: var(--dr-radius-full);
 }
 
+/* 抢购按钮 */
 .voucher-btn {
-    background-color: #ff6633;
-    color: white;
-    font-size: 14px;
-    line-height: 30px;
-    width: 65px;
-    text-align: center;
-    border-radius: 15px;
+  background: var(--dr-gradient);
+  color: #fff;
+  font-size: var(--dr-font-size-md);
+  line-height: 34px;
+  width: 72px;
+  text-align: center;
+  border-radius: var(--dr-radius-full);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(255, 102, 51, 0.3);
+  transition: var(--dr-transition);
 }
-.seckill-box{
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    font-size: 12px;
-    padding: 15px 0 0 0;
+
+.voucher-btn:active {
+  transform: scale(0.94);
 }
-.seckill-box div{
-    font-size: 12px;
+
+/* 秒杀区 */
+.seckill-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: var(--dr-font-size-sm);
 }
-.disable-btn{
-    background-color: #adacab;
+
+.seckill-box div {
+  font-size: var(--dr-font-size-sm);
+  margin: 2px 0;
 }
-.seckill-time{
-    color: #F63;
+
+.disable-btn {
+  background: #c9cdd4;
+  box-shadow: none;
+  cursor: not-allowed;
 }
+
+.seckill-time {
+  color: var(--dr-primary);
+  font-weight: 600;
+}
+
 .seckill-stock {
-    color: #adacab;
+  color: var(--dr-text-3);
 }
-.seckill-stock span{
-    background-color: #fce5e5;
-    color: rgb(240, 51, 51);
+
+.seckill-stock span {
+  background-color: #ffe4db;
+  color: var(--dr-error);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-weight: 600;
 }
-.copyright {
-    color: #d1d1d1;
-    margin-top: 20px;
-    text-shadow: 0 1px 1px #fff;
-    text-align: center;
-}
+
+/* ---------- 4. 评论 ---------- */
 .shop-comments {
-    padding: 10px;
+  padding: var(--dr-space-4);
+  background-color: var(--dr-card-bg);
 }
+
 .comments-head {
-    display: flex;
-    justify-content: space-between;
-    font-size: 14px;
-    font-weight: bold;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--dr-font-size-lg);
+  font-weight: 600;
+  color: var(--dr-text-1);
 }
+
 .comments-head span {
-    font-size: 12px;
-    font-weight: normal;
-    color: #82848a;
+  font-size: var(--dr-font-size-sm);
+  font-weight: normal;
+  color: var(--dr-text-3);
 }
+
 .comment-tags {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dr-space-2);
+  margin-top: var(--dr-space-3);
 }
+
 .comment-tags div {
-    width: 25%;
-    border: 1px solid #427fc4;
-    border-radius: 5px;
-    text-align: center;
-    color: #427fc4;
-    padding: 5px 10px;
-    margin-top: 7px;
+  border: 1px solid #ffd8cc;
+  border-radius: var(--dr-radius-full);
+  text-align: center;
+  color: var(--dr-primary);
+  padding: 4px 12px;
+  font-size: var(--dr-font-size-sm);
+  background-color: var(--dr-primary-bg);
 }
+
 .comment-list {
-    margin-top: 15px;
+  margin-top: var(--dr-space-4);
 }
+
 .comment-box {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 15px;
+  display: flex;
+  margin-bottom: var(--dr-space-4);
+  padding-bottom: var(--dr-space-4);
+  border-bottom: 1px solid var(--dr-divider);
 }
+
 .comment-icon {
-    width: 55px;
+  width: 52px;
+  flex-shrink: 0;
 }
-.comment-icon img{
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
+
+.comment-icon img {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
 }
+
 .comment-info {
-    width: 80%;
-    flex-grow: 1;
+  flex: 1;
+  min-width: 0;
 }
+
 .comment-user {
-    font-size: 14px;
+  font-size: var(--dr-font-size-md);
+  font-weight: 500;
+  color: var(--dr-text-1);
 }
+
 .comment-user span {
-    font-size: 10px;
-    padding: 0 10px;
-    border-radius: 8px;
-    background-color: #f7b253;
-    color: white;
+  font-size: var(--dr-font-size-xs);
+  padding: 1px 8px;
+  border-radius: var(--dr-radius-full);
+  background: linear-gradient(135deg, #ffb400, #ff8a00);
+  color: #fff;
+  margin-left: var(--dr-space-1);
 }
+
 .comment-images {
-    display: flex;
-    width: 100%;
-    overflow-x: scroll;
-    padding: 10px 0;
+  display: flex;
+  gap: var(--dr-space-2);
+  padding: var(--dr-space-2) 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+
+.comment-images::-webkit-scrollbar {
+  display: none;
+}
+
 .comment-images img {
-    height: 94px;
-    width: 92px;
-    border-radius: 5px;
-    margin-right: 5px;
+  height: 94px;
+  width: 92px;
+  border-radius: var(--dr-radius-md);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+/* 版权 */
+.copyright {
+  color: var(--dr-text-3);
+  margin: var(--dr-space-5) 0 var(--dr-space-6);
+  text-align: center;
+  font-size: var(--dr-font-size-sm);
+  opacity: 0.6;
+  padding-bottom: env(safe-area-inset-bottom);
 }

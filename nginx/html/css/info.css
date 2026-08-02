@@ -1,232 +1,422 @@
-.header{
-    width: 100%;
-    line-height: 40px;
-    height: 6%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 2px solid #ff6633;
+/* ==========================================================================
+   DishReview 个人主页 / 资料编辑样式
+   ========================================================================== */
+
+.header {
+  background-color: var(--dr-card-bg);
+  border-bottom: 1px solid var(--dr-divider);
 }
-.header-back-btn{
-    width: 10%;
-    color: #ff6633;
-    font-size: 22px;
+
+.header-back-btn {
+  color: var(--dr-text-1);
 }
-.header-title {
-    width: 90%;
-    text-align: center;
-    font-size: 18px;
-    font-family: Hiragino Sans GB,Arial,Helvetica,"\5B8B\4F53",sans-serif;
+
+/* ---------- 1. 用户信息头部 ---------- */
+.basic {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--dr-space-5);
+  background: linear-gradient(160deg, var(--dr-primary-bg) 0%, var(--dr-card-bg) 100%);
 }
-.basic{
-    height: 15%;
-    display: flex;
-    justify-content: space-between;
-    padding: 15px 15px 5px 15px;
-}
+
 .basic-icon {
-    width: 80px;
-    height: 80px;
-    padding: 1px;
-    background-color: #fff;
-    border-radius: 50%;
-    box-shadow: 0 0 3px 2px rgba(0, 0, 0, 0.07);
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 3px solid var(--dr-card-bg);
+  box-shadow: var(--dr-shadow-md);
+  flex-shrink: 0;
 }
+
 .basic-icon img {
-    border-radius: 50%;
-    width: 100%;
-    height: 100%;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .basic-info {
-    width: 54%;
-    padding: 8px;
-}
-.basic-info .name{
-    overflow: hidden;
-    font-weight: bold;
-    font-size: 14px;
-}
-.basic-info span{
-    display: inline-block;
-    padding: 0 10px;
-    background-color: #eeeded;
-    margin: 5px 0 10px;
-    border-radius: 2px;
- }
-
-.edit-btn{
-    width: 90%;
-    line-height: 20px;
-    border-radius: 12px;
-    text-align: center;
-    border: #eeeded 1px solid;
-    box-shadow: 0 1px 2px 1px rgba(0, 0, 0, 0.04);
-}
-.logout-btn{
-    width: 18%;
-    margin-top: 8px;
-    height: 20px;
-    line-height: 20px;
-    color: white;
-    padding: 0 2px;
-    border-radius: 3px;
-    background-color: #f63;
-    box-shadow: 0 1px 2px 1px rgba(0, 0, 0, 0.04);
+  flex: 1;
+  padding: 0 var(--dr-space-4);
+  min-width: 0;
 }
 
-.introduce{
-    padding: 0 15px;
+.basic-info .name {
+  font-weight: 600;
+  font-size: var(--dr-font-size-xl);
+  color: var(--dr-text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
+.basic-info span {
+  display: inline-block;
+  padding: 2px 12px;
+  background-color: var(--dr-card-bg);
+  color: var(--dr-text-2);
+  margin: var(--dr-space-2) 0;
+  border-radius: var(--dr-radius-full);
+  font-size: var(--dr-font-size-sm);
+  box-shadow: var(--dr-shadow-sm);
+}
+
+/* 编辑资料按钮 */
+.edit-btn {
+  display: inline-block;
+  width: auto;
+  padding: 6px 20px;
+  line-height: 20px;
+  border-radius: var(--dr-radius-full);
+  text-align: center;
+  border: 1px solid #ffd8cc;
+  color: var(--dr-primary);
+  background-color: var(--dr-card-bg);
+  font-size: var(--dr-font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--dr-transition);
+  box-shadow: var(--dr-shadow-sm);
+}
+
+.edit-btn:active {
+  transform: scale(0.95);
+  background-color: var(--dr-primary-bg);
+}
+
+/* 退出登录 / 关注按钮 */
+.logout-btn {
+  padding: 6px 14px;
+  height: auto;
+  line-height: 20px;
+  color: #fff;
+  border-radius: var(--dr-radius-full);
+  background: var(--dr-gradient);
+  font-size: var(--dr-font-size-sm);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(255, 102, 51, 0.3);
+  transition: var(--dr-transition);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.logout-btn:active {
+  transform: scale(0.95);
+}
+
+/* 简介 */
+.introduce {
+  padding: 0 var(--dr-space-5) var(--dr-space-3);
+  font-size: var(--dr-font-size-sm);
+  color: var(--dr-text-3);
+  background-color: var(--dr-card-bg);
+}
+
 .content {
-    height: 61%;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background-color: var(--dr-bg);
+  -webkit-overflow-scrolling: touch;
 }
 
-.edit-container{
-    background-color: #f4f4f4;
+/* 页面主体 flex 布局: 头部/简介固定, Tab 内容自适应并预留底部导航空间 */
+#app {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 60px;
 }
+
+/* ---------- 2. 资料编辑 ---------- */
+.edit-container {
+  background-color: var(--dr-bg);
+  min-height: calc(100% - 56px);
+  padding-bottom: var(--dr-space-4);
+}
+
 .divider {
-    height: 1px;
-    background-color: #e4e4e4;
+  height: 1px;
+  background-color: var(--dr-divider);
 }
+
 .info-box {
-    margin-bottom: 10px;
-    padding: 5px 15px;
-    background-color: #fff;
+  margin: var(--dr-space-3);
+  border-radius: var(--dr-radius-lg);
+  padding: var(--dr-space-2) var(--dr-space-4);
+  background-color: var(--dr-card-bg);
+  box-shadow: var(--dr-shadow-sm);
+  overflow: hidden;
 }
-.info-item{
-    display: flex;
-    justify-content: space-between;
-    line-height: 40px;
+
+.info-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  line-height: 48px;
+  min-height: 48px;
 }
-.info-btn{
-    display: flex;
+
+.info-label {
+  font-size: var(--dr-font-size-md);
+  color: var(--dr-text-1);
+  font-weight: 500;
 }
+
+.info-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--dr-space-2);
+  color: var(--dr-text-2);
+  font-size: var(--dr-font-size-md);
+}
+
+.info-btn img {
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border: 1px solid var(--dr-divider);
+}
+
 .info-btn div {
-    margin-left: 5px;
+  margin-left: 2px;
+  color: var(--dr-text-3);
 }
 
+.info-btn a {
+  color: var(--dr-primary);
+}
+
+/* ---------- 3. 我的笔记列表 ---------- */
 .blog-item {
-    display: flex;
-    padding: 10px;
-    height: 90px;
-    width: 90%;
-    box-shadow: 1px 1px 4px 1px rgba(0,0,0,0.1);
-    margin-bottom: 10px;
+  display: flex;
+  padding: var(--dr-space-3);
+  margin: 0 var(--dr-space-3) var(--dr-space-3);
+  background-color: var(--dr-card-bg);
+  border-radius: var(--dr-radius-lg);
+  box-shadow: var(--dr-shadow-sm);
+  transition: var(--dr-transition);
+  cursor: pointer;
 }
+
+.blog-item:active {
+  transform: scale(0.98);
+  box-shadow: var(--dr-shadow-md);
+}
+
 .blog-img {
-    width: 70px;
-    height: 90px;
-    margin-right: 10px;
+  width: 80px;
+  height: 80px;
+  border-radius: var(--dr-radius-md);
+  overflow: hidden;
+  flex-shrink: 0;
+  margin-right: var(--dr-space-3);
+  background: var(--dr-primary-bg);
 }
+
 .blog-img img {
-    width: 100%;
-    height: 100%;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
+
 .blog-info {
-    width: 50%;
-    flex-grow: 1;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
+
 .blog-title {
-    line-height: 20px;
+  font-size: var(--dr-font-size-md);
+  font-weight: 500;
+  color: var(--dr-text-1);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
+
 .blog-liked {
-    line-height: 16px;
-    align-items: center;
+  display: flex;
+  align-items: center;
+  gap: var(--dr-space-1);
+  font-size: var(--dr-font-size-sm);
+  color: var(--dr-text-3);
 }
+
 .blog-liked img {
-    width: 16px;
-    height: 16px;
+  width: 16px;
+  height: 16px;
 }
+
+.blog-comments {
+  display: flex;
+  align-items: center;
+  gap: var(--dr-space-1);
+  font-size: var(--dr-font-size-sm);
+  color: var(--dr-text-3);
+}
+
 .blog-comments i {
-    font-size: 16px;
+  font-size: var(--dr-font-size-lg);
+  color: var(--dr-text-3);
 }
 
-
-.follow-info{
-    display: flex;
-    justify-content: space-between;
-    padding: 15px 10px 5px 10px;
-    align-items: center;
+/* ---------- 4. 共同关注列表 ---------- */
+.follow-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--dr-space-3) var(--dr-space-4);
+  margin: var(--dr-space-2) var(--dr-space-3);
+  background-color: var(--dr-card-bg);
+  border-radius: var(--dr-radius-lg);
+  box-shadow: var(--dr-shadow-sm);
 }
+
 .follow-info-icon {
-    width: 15%;
-    padding: 1px;
-    background-color: #fff;
-    border-radius: 50%;
-    box-shadow: 0 0 3px 2px rgba(0, 0, 0, 0.07);
-}
-.follow-info-icon img {
-    border-radius: 50%;
-    width: 100%;
-    height: 100%;
-}
-.follow-info-name{
-    width: 56%;
-    padding: 8px;
-    font-size: 14px;
-}
-.follow-info-btn{
-    width: 30%;
-    font-size: 10px;
-    line-height: 20px;
-    height: 20px;
-    border: #ff6633 1px solid;
-    color: #ff6633;
-    border-radius: 5px;
-    text-align: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: var(--dr-shadow-sm);
+  flex-shrink: 0;
 }
 
-/*达人探店列表*/
+.follow-info-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.follow-info-name {
+  flex: 1;
+  padding: 0 var(--dr-space-3);
+  font-size: var(--dr-font-size-md);
+  font-weight: 500;
+  color: var(--dr-text-1);
+}
+
+.follow-info-btn {
+  font-size: var(--dr-font-size-sm);
+  padding: 5px 14px;
+  border: 1px solid #ffd8cc;
+  color: var(--dr-primary);
+  border-radius: var(--dr-radius-full);
+  text-align: center;
+  background-color: var(--dr-primary-bg);
+  cursor: pointer;
+  transition: var(--dr-transition);
+  white-space: nowrap;
+}
+
+.follow-info-btn:active {
+  background-color: var(--dr-primary);
+  color: #fff;
+}
+
+/* ---------- 5. 关注动态瀑布流 ---------- */
 .blog-list {
-    height: 100%;
-    width: 100%;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-around;
-    overflow-y: auto;
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  padding: var(--dr-space-2);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
-.blog-box{
-    width: 90%;
-    background-color: #fff;
-    margin: 5px 0;
-    box-shadow: 0 3px 4px 1px rgba(0, 0, 0, 0.1);
-    border-radius: 3px;
+
+.blog-box {
+  width: 48.5%;
+  background-color: var(--dr-card-bg);
+  margin-bottom: var(--dr-space-3);
+  box-shadow: var(--dr-shadow-sm);
+  border-radius: var(--dr-radius-md);
+  overflow: hidden;
+  transition: var(--dr-transition);
 }
-.blog-img2 img{
-    width: 100%;
-    border-radius: 3px;
+
+.blog-box:active {
+  transform: scale(0.98);
+  box-shadow: var(--dr-shadow-md);
 }
+
+.blog-img2 {
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--dr-primary-bg);
+}
+
+.blog-img2 img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.4s ease;
+}
+
+.blog-box:active .blog-img2 img {
+  transform: scale(1.05);
+}
+
 .blog-title {
-    padding: 2px 10px;
-    line-height: 24px;
-    width: 92%;
-    overflow: hidden;
+  padding: var(--dr-space-2) var(--dr-space-3);
+  font-size: var(--dr-font-size-md);
+  font-weight: 500;
+  color: var(--dr-text-1);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  height: 40px;
 }
+
 .blog-foot {
-    display: flex;
-    justify-content: space-between;
-    margin: 10px 0 5px 0;
-    padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--dr-space-2) var(--dr-space-3) var(--dr-space-3);
 }
+
 .blog-user-icon {
-    width: 10%;
-    margin-right: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  margin-right: 6px;
 }
+
+.blog-user-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .blog-user-name {
-    width: 65%;
-    overflow: hidden;
+  flex: 1;
+  font-size: var(--dr-font-size-sm);
+  color: var(--dr-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.blog-user-icon img{
-    width: 100%;
-}
+
 .blog-liked {
-    width: 25%;
-    display: flex;
-    justify-content: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--dr-font-size-sm);
+  color: var(--dr-text-3);
+  cursor: pointer;
+  transition: var(--dr-transition);
 }
-.blog-liked img{
-    width: 30%;
-    height: 75%;
-    margin-right: 2px;
+
+.blog-liked:active {
+  transform: scale(1.15);
 }

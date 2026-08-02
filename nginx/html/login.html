@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
@@ -22,18 +22,18 @@
     </div>
     <div class="content">
       <div class="login-form">
-        <div style="display: flex; justify-content: space-between">
-          <el-input style="width: 60%" placeholder="请输入手机号" v-model="form.phone" >
+        <div class="phone-row">
+          <el-input class="phone-input" placeholder="请输入手机号" v-model="form.phone">
           </el-input>
-          <el-button style="width: 38%" @click="sendCode" type="success" :disabled="disabled">{{codeBtnMsg}}</el-button>
+          <el-button class="code-btn" @click="sendCode" :disabled="disabled">{{codeBtnMsg}}</el-button>
         </div>
 
         <div style="height: 5px"></div>
         <el-input placeholder="请输入验证码" v-model="form.code">
         </el-input>
-        <div style="text-align: center; color: #8c939d;margin: 5px 0">未注册的手机号码验证后自动创建账户</div>
-        <el-button @click="login" style="width: 100%; background-color:#f63; color: #fff;">登录</el-button>
-        <div style="text-align: right; color:#333333; margin: 5px 0"><a href="/login2.html">密码登录</a></div>
+        <div class="login-tip">未注册的手机号码验证后自动创建账户</div>
+        <el-button @click="login" class="login-btn">登录</el-button>
+        <div class="login-switch"><a href="/login2.html">密码登录</a></div>
       </div>
       <div class="login-radio">
         <div>

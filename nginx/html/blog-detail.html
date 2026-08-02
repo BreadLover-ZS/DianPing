@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
@@ -12,13 +12,16 @@
 
   <style type="text/css">
     .header{
-        position: relative;
+        position: fixed;
+    }
+    .blog-scroll{
+        height: calc(100vh - 56px - 56px);
+        overflow-y: auto;
+        overflow-x: hidden;
+        margin-top: 56px;
     }
     .foot-view span{
         font-size: 12px;
-    }
-    .liked{
-
     }
   </style>
 </head>
@@ -29,7 +32,7 @@
     <div class="header-title"></div>
     <div class="header-share">...</div>
   </div>
-  <div style="height: 85%; overflow-y: scroll; overflow-x: hidden">
+  <div class="blog-scroll">
     <div class="blog-info-box" ref="swiper"
          @touchstart="moveStart"
          @touchmove="moving"
