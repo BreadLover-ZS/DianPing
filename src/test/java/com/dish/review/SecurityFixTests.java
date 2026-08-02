@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -22,8 +24,9 @@ public class SecurityFixTests {
 
     // ==================== Fix 3: 文件上传类型白名单校验 ====================
 
-    /** 允许上传的文件扩展名白名单（与 UploadController 保持一致） */
-    private static final Set<String> ALLOWED_EXTENSIONS = Set.of("jpg", "jpeg", "png", "gif", "webp", "bmp");
+    /** 允许上传的文件扩展名白名单（与 UploadController 保持一致，Java 8 兼容写法） */
+    private static final Set<String> ALLOWED_EXTENSIONS =
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList("jpg", "jpeg", "png", "gif", "webp", "bmp")));
 
     /**
      * 测试文件扩展名白名单校验

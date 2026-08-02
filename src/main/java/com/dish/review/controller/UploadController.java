@@ -10,6 +10,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
@@ -27,8 +30,12 @@ import java.util.UUID;
 @RequestMapping("upload")
 public class UploadController {
 
-    /** 允许上传的文件扩展名白名单 */
-    private static final Set<String> ALLOWED_EXTENSIONS = Set.of("jpg", "jpeg", "png", "gif", "webp", "bmp");
+    /**
+     * 允许上传的文件扩展名白名单
+     * Java 8 兼容写法（Set.of 需 Java 9+），使用不可变 Set 保证线程安全
+     */
+    private static final Set<String> ALLOWED_EXTENSIONS =
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList("jpg", "jpeg", "png", "gif", "webp", "bmp")));
 
     /** 最大文件大小：5MB */
     private static final long MAX_FILE_SIZE = 5 * 1024 * 1024;
