@@ -14,6 +14,13 @@
  Date: 14/03/2022 21:38:11
 */
 
+-- ==========================================================================
+-- 建库语句(若数据库已存在则忽略, 幂等可重复执行)
+-- 使用前请确认目标 MySQL 的字符集配置
+-- ==========================================================================
+CREATE DATABASE IF NOT EXISTS `dish_review` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+USE `dish_review`;
+
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
