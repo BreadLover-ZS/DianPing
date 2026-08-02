@@ -1,35 +1,39 @@
 package com.hmdp.utils;
 
-import cn.hutool.core.bean.BeanUtil;
-import cn.hutool.core.util.StrUtil;
-import com.hmdp.dto.UserDTO;
-import com.hmdp.entity.User;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.lang.Nullable;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import javax.servlet.http.HttpSession;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
+/**
+ * 登录拦截器
+ * 校验用户是否已登录，未登录则返回 401 状态码
+ *
+ * 【安全修复 Fix 9】添加 afterCompletion 方法确保 ThreadLocal 清理
+ * 虽然 RefreshTokenInterceptor 已有清理逻辑，但作为纵深防御，
+ * 在此拦截器中也添加清理，确保任何异常情况下 ThreadLocal 都不会泄漏
+ * 防止 Tomcat 线程池复用时出现用户信息串号问题
+ */
 public class LoginInterceptor implements HandlerInterceptor {
+
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        //获取Session
-//        服务器先从当前请求（Cookie/URL 重写参数）里提取 JSESSIONID；
-//        根据 JSESSIONID 去服务器内存 / 持久化容器查找对应的 HttpSession 对象；
-//        找不到 / 没有 JSESSIONID：新建 Session，并返回新对象，同时给客户端下发带 JSESSIONID 的 Cookie。
-//        HttpSession session = request.getSession();
-
-
-        if(UserHolder.getUser() == null){
+        // 校验用户是否登录
+        if (UserHolder.getUser() == null) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return false;
         }
         return true;
     }
 
+    /**
+     * 【安全修复 Fix 9】纵深防御 -- 确保请求结束后清理 ThreadLocal
+     * 防止 Tomcat 线程池复用时出现用户信息串号问题
+     * UserHolder.removeUser() 是幂等操作，多次调用安全
+     */
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, @Nullable Exception ex) throws Exception {
+        UserHolder.removeUser();
+    }
 }

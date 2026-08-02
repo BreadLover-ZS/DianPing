@@ -4,6 +4,8 @@ package com.hmdp.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
+import cn.hutool.core.util.StrUtil;
+import cn.hutool.http.HtmlUtil;
 import com.hmdp.entity.Blog;
 import com.hmdp.entity.User;
 import com.hmdp.service.IBlogService;
@@ -34,6 +36,15 @@ public class BlogController {
 
     @PostMapping
     public Result saveBlog(@RequestBody Blog blog) {
+        // 【安全修复 Fix 13】XSS 防护 —— 对用户输入的标题和内容进行 HTML 转义
+        // 将 <script> 等危险标签转换为 &lt;script&gt;，防止存储型 XSS 攻击
+        if (StrUtil.isNotBlank(blog.getTitle())) {
+            blog.setTitle(HtmlUtil.escape(blog.getTitle()));
+        }
+        if (StrUtil.isNotBlank(blog.getContent())) {
+            blog.setContent(HtmlUtil.escape(blog.getContent()));
+        }
+
         // 获取登录用户
         UserDTO user = UserHolder.getUser();
         blog.setUserId(user.getId());

@@ -54,12 +54,14 @@ public class UserController {
 
     /**
      * 登出功能
-     * @return 无
+     * 【安全修复 Fix 12】从请求头获取 token，调用 service 删除 Redis 中的 token 使其失效
+     *
+     * @param token 用户登录令牌（从请求头 authorization 获取）
+     * @return 登出结果
      */
     @PostMapping("/logout")
-    public Result logout(){
-        // TODO 实现登出功能
-        return Result.fail("功能未完成");
+    public Result logout(@RequestHeader(value = "authorization", required = false) String token) {
+        return userService.logout(token);
     }
 
     @GetMapping("/me")
