@@ -8,11 +8,11 @@
         <version>2.3.12.RELEASE</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
-    <groupId>com.hmdp</groupId>
-    <artifactId>hm-dianping</artifactId>
+    <groupId>com.dish.review</groupId>
+    <artifactId>dish-review</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>hm-dianping</name>
-    <description>Demo project for Spring Boot</description>
+    <name>dish-review</name>
+    <description>DishReview - 餐饮点评平台</description>
     <properties>
         <java.version>1.8</java.version>
     </properties>

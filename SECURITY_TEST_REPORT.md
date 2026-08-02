@@ -1,10 +1,10 @@
-﻿# 黑马点评项目安全修复测试报告
+# DishReview项目安全修复测试报告
 
 ## 测试概要
 
 | 项目 | 内容 |
 |------|------|
-| 项目名称 | hm-dianping (黑马点评) |
+| 项目名称 | dish-review (DishReview) |
 | 测试日期 | 2026-08-02 |
 | 测试环境 | Windows + JDK 1.8 + Maven |
 | 测试框架 | JUnit 5 + Spring Boot Test |

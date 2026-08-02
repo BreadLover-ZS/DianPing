@@ -1,7 +1,7 @@
-﻿# 黑马点评项目安全修复文档
+# DishReview项目安全修复文档
 
 ## 项目概述
-- 项目名称: hm-dianping (黑马点评)
+- 项目名称: dish-review (DishReview)
 - 技术栈: Spring Boot 2.3.12 + MyBatis-Plus 3.4.3 + Redis + MySQL
 - 代码版本: GitHub 7.14
 - 修复时间: 2026-08-02

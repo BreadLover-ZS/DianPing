@@ -2,12 +2,12 @@ server:
   port: 8081
 spring:
   application:
-    name: hmdp
+    name: dish-review
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
     # 【安全修复 Fix 1-2】使用环境变量管理数据库连接信息，避免敏感凭证硬编码和公网暴露
     # 生产环境通过环境变量或配置中心（如 Nacos）注入，默认值仅用于本地开发
-    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/hmdp?useSSL=false&serverTimezone=UTC
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/dish_review?useSSL=false&serverTimezone=UTC
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD:}
   redis:
@@ -24,8 +24,8 @@ spring:
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
 mybatis-plus:
-  type-aliases-package: com.hmdp.entity # 别名扫描包
+  type-aliases-package: com.dish.review.entity # 别名扫描包
 logging:
   level:
     # 【安全修复】生产环境使用 info 级别，避免 debug 日志泄露敏感信息
-    com.hmdp: info
+    com.dish.review: info
