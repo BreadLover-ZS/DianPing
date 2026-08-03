@@ -2,15 +2,16 @@ package com.dish.review.utils;
 
 import cn.hutool.core.lang.UUID;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.stereotype.Component;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 /**
  * 基于Redis实现的简单分布式锁
  * <p>
  * 通过Redis SETNX命令实现互斥，锁值为"应用级UUID+线程ID"以区分持有者。
- * 注意：unlock的判断与删除非原子操作，高并发下建议后续升级为Lua脚本实现。
+ * 释放锁时使用Lua脚本原子校验持有者并删除，避免误删其他线程的锁。
  */
 public class SimpleRedisLock implements ILock{
 
@@ -18,6 +19,10 @@ public class SimpleRedisLock implements ILock{
     private final StringRedisTemplate stringRedisTemplate;
     private static final String KEY_PREFIX = "lock:";
     private static final String ID_PREFIX = UUID.randomUUID().toString(true) + "-";
+    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT = new DefaultRedisScript<>(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then " +
+                    "return redis.call('del', KEYS[1]) " +
+                    "else return 0 end", Long.class);
 
     /**
      * 构造SimpleRedisLock实例
@@ -50,21 +55,16 @@ public class SimpleRedisLock implements ILock{
     }
 
     /**
-     * 释放分布式锁
+     * 释放分布式锁。
      * <p>
-     * 释放前校验锁是否属于当前线程，避免误删其他线程持有的锁。
-     * 注意：当前校验与删除为非原子操作，极端场景下仍可能误删，建议后续改用Lua脚本保证原子性。
+     * 通过Lua脚本保证“校验锁持有者”和“删除锁”是一个原子操作。
      */
     @Override
     public void unlock() {
         String threadId = ID_PREFIX + Thread.currentThread().getId();
-        //释放锁之前需要判断是否是自己的锁：如果业务时间太久，锁被自动释放，别的线程获取锁后，被本线程释放，将出现问题
-        //判断锁标识和释放锁应该是原子操作：如果在判断锁标识后，线程被阻塞，可能会释放不属于自己的锁
-
-        if (!threadId.equals(stringRedisTemplate.opsForValue().get(KEY_PREFIX + name))) {
-            return;
-        }
-
-        stringRedisTemplate.delete(KEY_PREFIX + name);
+        stringRedisTemplate.execute(
+                UNLOCK_SCRIPT,
+                Collections.singletonList(KEY_PREFIX + name),
+                threadId);
     }
 }

@@ -48,6 +48,9 @@ import java.util.stream.Collectors;
 @Service
 public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IShopService {
 
+    /** 附近商铺查询半径：5 公里。 */
+    private static final double SHOP_GEO_RADIUS_KILOMETERS = 5D;
+
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
@@ -275,8 +278,10 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         if (Boolean.FALSE.equals(stringRedisTemplate.hasKey(key))) {
             loadShopGeo(typeId, key);
         }
-        // 以坐标为中心，查询 5km 内的商铺（按距离升序）
-        Circle circle = new Circle(new Point(x, y), new Distance(5000, Metrics.KILOMETERS));
+        // 以坐标为中心，查询 5km 内的商铺（按距离升序）。
+        // Distance 的数值会按照 Metrics.KILOMETERS 解释，不能传入 5000。
+        Circle circle = new Circle(new Point(x, y),
+                new Distance(SHOP_GEO_RADIUS_KILOMETERS, Metrics.KILOMETERS));
         GeoResults<RedisGeoCommands.GeoLocation<String>> results = stringRedisTemplate.opsForGeo()
                 .radius(key, circle, GeoRadiusCommandArgs.newGeoRadiusArgs()
                         .includeDistance()

@@ -12,6 +12,7 @@ import com.dish.review.service.IFollowService;
 import com.dish.review.service.IUserService;
 import com.dish.review.utils.RedisConstants;
 import com.dish.review.utils.UserHolder;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -50,19 +51,34 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
     @Override
     public Result follow(Long followUserId, Boolean isFollow) {
         Long userId = UserHolder.getUser().getId();
+        if (followUserId == null || isFollow == null) {
+            return Result.fail("关注参数无效");
+        }
+        if (userId.equals(followUserId)) {
+            return Result.fail("不能关注自己");
+        }
         String key = RedisConstants.FOLLOWS_KEY + userId;
-        if (isFollow) {
+        if (Boolean.TRUE.equals(isFollow)) {
             // 关注：先判断是否已关注，避免重复关注
             Integer count = query().eq("user_id", userId).eq("follow_user_id", followUserId).count();
             if (count > 0) {
+                // 数据库已存在关系时补写 Redis，修复可能的缓存缺失。
+                stringRedisTemplate.opsForSet().add(key, followUserId.toString());
                 return Result.ok();
             }
             Follow follow = new Follow();
             follow.setUserId(userId);
             follow.setFollowUserId(followUserId);
             follow.setCreateTime(LocalDateTime.now());
-            boolean success = save(follow);
-            if (success) {
+            try {
+                boolean success = save(follow);
+                if (success) {
+                    stringRedisTemplate.opsForSet().add(key, followUserId.toString());
+                } else {
+                    return Result.fail("关注失败");
+                }
+            } catch (DuplicateKeyException e) {
+                // 唯一索引拦截并发重复关注，将其视为幂等成功，并修复 Redis 集合。
                 stringRedisTemplate.opsForSet().add(key, followUserId.toString());
             }
         } else {

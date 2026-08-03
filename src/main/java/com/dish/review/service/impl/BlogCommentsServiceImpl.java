@@ -8,6 +8,7 @@ import com.dish.review.service.IBlogCommentsService;
 import com.dish.review.service.IBlogService;
 import com.dish.review.utils.UserHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
@@ -50,7 +51,14 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
      * @return 新增评论的id
      */
     @Override
+    @Transactional
     public Result saveComment(BlogComments comment) {
+        if (comment == null || comment.getBlogId() == null) {
+            return Result.fail("博客参数无效");
+        }
+        if (blogService.getById(comment.getBlogId()) == null) {
+            return Result.fail("博客不存在");
+        }
         Long userId = UserHolder.getUser().getId();
         comment.setUserId(userId);
         comment.setCreateTime(LocalDateTime.now());
@@ -62,7 +70,13 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
             return Result.fail("评论失败");
         }
         // 博客评论数 +1
-        blogService.update().setSql("comments = comments + 1").eq("id", comment.getBlogId()).update();
+        boolean updated = blogService.update()
+                .setSql("comments = COALESCE(comments, 0) + 1")
+                .eq("id", comment.getBlogId())
+                .update();
+        if (!updated) {
+            throw new IllegalStateException("博客评论数更新失败");
+        }
         return Result.ok(comment.getId());
     }
 }

@@ -14,6 +14,7 @@ import com.dish.review.service.IBlogService;
 import com.dish.review.service.IFollowService;
 import com.dish.review.service.IUserService;
 import com.dish.review.utils.RedisConstants;
+import com.dish.review.utils.SimpleRedisLock;
 import com.dish.review.utils.SystemConstants;
 import com.dish.review.utils.UserHolder;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -102,22 +103,61 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     public Result likeBlog(Long id) {
         Long userId = UserHolder.getUser().getId();
         String key = RedisConstants.BLOG_LIKED_KEY + id;
-        // 判断当前用户是否已经点赞
-        Double score = stringRedisTemplate.opsForZSet().score(key, userId.toString());
-        if (score == null) {
-            // 未点赞：数据库点赞数 +1，保存用户到 Redis 的 ZSet
-            boolean success = update().setSql("liked = liked + 1").eq("id", id).update();
-            if (success) {
-                stringRedisTemplate.opsForZSet().add(key, userId.toString(), System.currentTimeMillis());
-            }
-        } else {
-            // 已点赞：取消点赞，数据库点赞数 -1，移除 Redis 中的用户
-            boolean success = update().setSql("liked = liked - 1").eq("id", id).update();
-            if (success) {
-                stringRedisTemplate.opsForZSet().remove(key, userId.toString());
-            }
+        // 同一用户对同一博客的点赞/取消点赞必须串行化，避免两个请求同时看到相同状态。
+        SimpleRedisLock lock = new SimpleRedisLock(
+                "blog:like:" + id + ":" + userId,
+                stringRedisTemplate);
+        if (!lock.tryLock(10L)) {
+            return Result.fail("操作频繁，请稍后重试");
         }
-        return Result.ok();
+        try {
+            // 加锁后重新读取状态，不能使用加锁前的判断结果。
+            Double score = stringRedisTemplate.opsForZSet().score(key, userId.toString());
+            if (score == null) {
+                return increaseLike(id, key, userId);
+            }
+            return decreaseLike(id, key, userId);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private Result increaseLike(Long id, String key, Long userId) {
+        boolean success = update()
+                .setSql("liked = COALESCE(liked, 0) + 1")
+                .eq("id", id)
+                .update();
+        if (!success) {
+            return Result.fail("笔记不存在");
+        }
+        try {
+            stringRedisTemplate.opsForZSet().add(key, userId.toString(), System.currentTimeMillis());
+            return Result.ok();
+        } catch (RuntimeException e) {
+            // Redis 写入失败时尽力补偿数据库计数，避免下次重试再次累加。
+            update().setSql("liked = CASE WHEN COALESCE(liked, 0) > 0 THEN liked - 1 ELSE 0 END")
+                    .eq("id", id).update();
+            throw e;
+        }
+    }
+
+    private Result decreaseLike(Long id, String key, Long userId) {
+        boolean success = update()
+                .setSql("liked = CASE WHEN COALESCE(liked, 0) > 0 THEN liked - 1 ELSE 0 END")
+                .eq("id", id)
+                .update();
+        if (!success) {
+            return Result.fail("笔记不存在");
+        }
+        try {
+            stringRedisTemplate.opsForZSet().remove(key, userId.toString());
+            return Result.ok();
+        } catch (RuntimeException e) {
+            // Redis 删除失败时尽力恢复数据库点赞数。
+            update().setSql("liked = COALESCE(liked, 0) + 1")
+                    .eq("id", id).update();
+            throw e;
+        }
     }
 
     /**
