@@ -62,7 +62,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         Long userId = UserHolder.getUser().getId();
 
-        //获取锁
+        //获取锁（同一用户同时发送多个购买请求，只有一个请求可以获得锁）
         SimpleRedisLock lock = new SimpleRedisLock("order:" + userId, stringRedisTemplate);
 
         boolean isLocked = lock.tryLock(1200L);

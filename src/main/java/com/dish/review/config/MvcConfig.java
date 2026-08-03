@@ -11,8 +11,6 @@ import javax.annotation.Resource;
 
 /**
  * MVC 拦截器配置
- *
- * 【安全修复 Fix 3/5】调整拦截器排除路径：
  * 1. 移除 /upload/** 排除项，文件上传必须登录
  * 2. /shop/** 细化为仅排除查询接口（GET），POST/PUT 操作需认证
  * 3. /voucher/** 细化为仅排除查询接口（GET /voucher/list/**），新增需认证
