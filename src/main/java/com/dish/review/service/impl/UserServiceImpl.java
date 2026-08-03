@@ -16,14 +16,19 @@ import com.dish.review.utils.PasswordEncoder;
 import com.dish.review.utils.RedisConstants;
 import com.dish.review.utils.RegexUtils;
 import com.dish.review.utils.SystemConstants;
+import com.dish.review.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -264,5 +269,56 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         // 保存用户到数据库
         save(user);
         return user;
+    }
+
+    /**
+     * 用户签到（基于 Redis BitMap，按月存储）
+     * key 为 sign:{userId}:yyyyMM，第 N 天对应第 N-1 个 bit
+     *
+     * @return 签到结果
+     */
+    @Override
+    public Result sign() {
+        Long userId = UserHolder.getUser().getId();
+        LocalDateTime now = LocalDateTime.now();
+        String keySuffix = now.format(DateTimeFormatter.ofPattern(":yyyyMM"));
+        String key = RedisConstants.USER_SIGN_KEY + userId + keySuffix;
+        int dayOfMonth = now.getDayOfMonth();
+        // 第 N 天对应第 N-1 个 bit（bit 从 0 开始）
+        stringRedisTemplate.opsForValue().setBit(key, dayOfMonth - 1, true);
+        return Result.ok();
+    }
+
+    /**
+     * 统计当前用户本月连续签到天数
+     * 从今天开始向低位遍历，统计连续为 1 的 bit 个数
+     *
+     * @return 连续签到天数
+     */
+    @Override
+    public Result signCount() {
+        Long userId = UserHolder.getUser().getId();
+        LocalDateTime now = LocalDateTime.now();
+        String keySuffix = now.format(DateTimeFormatter.ofPattern(":yyyyMM"));
+        String key = RedisConstants.USER_SIGN_KEY + userId + keySuffix;
+        int dayOfMonth = now.getDayOfMonth();
+        // 取本月从第 1 天到今天的所有签到位（一个无符号整数）
+        List<Long> result = stringRedisTemplate.opsForValue().bitField(key,
+                BitFieldSubCommands.create()
+                        .get(BitFieldSubCommands.BitFieldType.unsigned(dayOfMonth)).valueAt(0));
+        if (result == null || result.isEmpty()) {
+            return Result.ok(0);
+        }
+        Long num = result.get(0);
+        if (num == null || num == 0) {
+            return Result.ok(0);
+        }
+        // 从最低位（今天）开始，统计连续为 1 的个数
+        int count = 0;
+        while ((num & 1) != 0) {
+            count++;
+            num >>>= 1;
+        }
+        return Result.ok(count);
     }
 }

@@ -1,6 +1,7 @@
 package com.dish.review.controller;
 
 
+import cn.hutool.core.bean.BeanUtil;
 import com.dish.review.dto.LoginFormDTO;
 import com.dish.review.dto.Result;
 import com.dish.review.dto.UserDTO;
@@ -83,5 +84,43 @@ public class UserController {
         info.setUpdateTime(null);
         // 返回
         return Result.ok(info);
+    }
+
+    /**
+     * 根据id查询用户基本信息
+     * 用于他人主页展示昵称、头像，仅返回非敏感信息
+     *
+     * @param userId 用户id
+     * @return 用户基本信息（UserDTO，仅含 id、nickName、icon）
+     */
+    @GetMapping("/{id:\\d+}")
+    public Result queryUserById(@PathVariable("id") Long userId) {
+        User user = userService.getById(userId);
+        if (user == null) {
+            return Result.ok();
+        }
+        // 转为 UserDTO，避免泄露手机号、密码等敏感信息
+        UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
+        return Result.ok(userDTO);
+    }
+
+    /**
+     * 用户签到
+     *
+     * @return 签到结果
+     */
+    @PostMapping("/sign")
+    public Result sign() {
+        return userService.sign();
+    }
+
+    /**
+     * 统计本月连续签到天数
+     *
+     * @return 连续签到天数
+     */
+    @GetMapping("/sign/count")
+    public Result signCount() {
+        return userService.signCount();
     }
 }

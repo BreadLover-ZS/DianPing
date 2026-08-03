@@ -43,4 +43,18 @@ public interface IUserService extends IService<User> {
      * @return 登出结果
      */
     Result logout(String token);
+
+    /**
+     * 用户签到（基于 Redis BitMap，按月存储）
+     *
+     * @return 签到结果
+     */
+    Result sign();
+
+    /**
+     * 统计当前用户本月连续签到天数
+     *
+     * @return 连续签到天数
+     */
+    Result signCount();
 }

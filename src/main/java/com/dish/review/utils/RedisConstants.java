@@ -24,4 +24,10 @@ public class RedisConstants {
     public static final String FEED_KEY = "feed:";
     public static final String SHOP_GEO_KEY = "shop:geo:";
     public static final String USER_SIGN_KEY = "sign:";
+
+    /**
+     * 关注集合 Key 前缀，存储某个用户关注的人的 id 集合（Set 结构）
+     * 用于共同关注（求交集）等场景
+     */
+    public static final String FOLLOWS_KEY = "follows:";
 }

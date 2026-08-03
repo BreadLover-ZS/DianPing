@@ -4,6 +4,7 @@ import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.dish.review.dto.Result;
 import com.dish.review.entity.Shop;
 import com.dish.review.mapper.ShopMapper;
@@ -12,15 +13,29 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.dish.review.utils.CacheClient;
 import com.dish.review.utils.RedisConstants;
 import com.dish.review.utils.RedisData;
+import com.dish.review.utils.SystemConstants;
+import org.springframework.data.geo.Circle;
+import org.springframework.data.geo.Distance;
+import org.springframework.data.geo.GeoResult;
+import org.springframework.data.geo.GeoResults;
+import org.springframework.data.geo.Metrics;
+import org.springframework.data.geo.Point;
+import org.springframework.data.redis.connection.RedisGeoCommands;
+import org.springframework.data.redis.connection.RedisGeoCommands.GeoRadiusCommandArgs;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * <p>
@@ -41,18 +56,12 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     public Result queryById(Long id) {
-        //解决缓存穿透
-//        Shop shop = queryWithPassThrough(id);
-//        Shop shop = cacheClient
-//                .queryWithPassThrough(RedisConstants.CACHE_SHOP_KEY, id, Shop.class, this::getById, RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
-
-        //互斥锁解决缓存击穿
-//        Shop shop = queryWithMutex(id);
-
-        //逻辑过期解决缓存击穿
-//        Shop shop = queryWithLogicalExpire(id);
+        // 缓存穿透方案：缓存未命中时回源数据库，并在数据库不存在时缓存空值
+        // 说明：逻辑过期方案（queryWithLogicalExpire）需要预先预热缓存（saveShop2Redis），
+        //       冷启动时缓存为空会直接返回 null，导致店铺详情不可用。
+        //       为保证冷启动可用，默认采用缓存穿透方案；逻辑过期方案作为击穿优化的参考实现保留在下方。
         Shop shop = cacheClient
-                .queryWithLogicalExpire(RedisConstants.CACHE_SHOP_KEY, id, Shop.class, this::getById, RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
+                .queryWithPassThrough(RedisConstants.CACHE_SHOP_KEY, id, Shop.class, this::getById, RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
         if (shop == null) {
             return Result.fail("店铺不存在");
         }
@@ -239,5 +248,83 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         //2.删除缓存
         stringRedisTemplate.delete(RedisConstants.CACHE_SHOP_KEY + id);
         return Result.ok();
+    }
+
+    /**
+     * 根据商铺类型查询附近商铺（基于 Redis GEO）
+     * 若未传坐标，则退化为普通分页查询
+     *
+     * @param typeId  商铺类型
+     * @param current 页码
+     * @param x       经度
+     * @param y       纬度
+     * @return 商铺列表（含距离）
+     */
+    @Override
+    public Result queryShopByType(Integer typeId, Integer current, Double x, Double y) {
+        // 无坐标，退化为按类型分页查询
+        if (x == null || y == null) {
+            Page<Shop> page = query()
+                    .eq("type_id", typeId)
+                    .page(new Page<>(current, SystemConstants.DEFAULT_PAGE_SIZE));
+            return Result.ok(page.getRecords());
+        }
+        // 基于 Redis GEO 查询附近商铺
+        String key = RedisConstants.SHOP_GEO_KEY + typeId;
+        // 若 GEO 数据未加载，从数据库加载该类型所有店铺坐标
+        if (Boolean.FALSE.equals(stringRedisTemplate.hasKey(key))) {
+            loadShopGeo(typeId, key);
+        }
+        // 以坐标为中心，查询 5km 内的商铺（按距离升序）
+        Circle circle = new Circle(new Point(x, y), new Distance(5000, Metrics.KILOMETERS));
+        GeoResults<RedisGeoCommands.GeoLocation<String>> results = stringRedisTemplate.opsForGeo()
+                .radius(key, circle, GeoRadiusCommandArgs.newGeoRadiusArgs()
+                        .includeDistance()
+                        .sortAscending());
+        if (results == null) {
+            return Result.ok(Collections.emptyList());
+        }
+        List<GeoResult<RedisGeoCommands.GeoLocation<String>>> list = results.getContent();
+        // radius 不支持 offset，这里手动分页
+        int size = SystemConstants.DEFAULT_PAGE_SIZE;
+        int from = (current - 1) * size;
+        if (from >= list.size()) {
+            return Result.ok(Collections.emptyList());
+        }
+        int end = Math.min(from + size, list.size());
+        List<GeoResult<RedisGeoCommands.GeoLocation<String>>> pageList = list.subList(from, end);
+        // 取出店铺id
+        List<Long> ids = pageList.stream()
+                .map(r -> Long.valueOf(r.getContent().getName()))
+                .collect(Collectors.toList());
+        // 查询店铺信息并保持按距离升序
+        Map<Long, Shop> shopMap = listByIds(ids).stream()
+                .collect(Collectors.toMap(Shop::getId, s -> s));
+        List<Shop> shops = new ArrayList<>();
+        for (GeoResult<RedisGeoCommands.GeoLocation<String>> r : pageList) {
+            Long id = Long.valueOf(r.getContent().getName());
+            Shop shop = shopMap.get(id);
+            if (shop == null) {
+                continue;
+            }
+            shop.setDistance(r.getDistance().getValue());
+            shops.add(shop);
+        }
+        return Result.ok(shops);
+    }
+
+    /**
+     * 从数据库加载指定类型商铺的坐标到 Redis GEO
+     *
+     * @param typeId 商铺类型
+     * @param key    GEO 缓存键
+     */
+    private void loadShopGeo(Integer typeId, String key) {
+        List<Shop> shops = query().eq("type_id", typeId).list();
+        for (Shop shop : shops) {
+            if (shop.getX() != null && shop.getY() != null) {
+                stringRedisTemplate.opsForGeo().add(key, new Point(shop.getX(), shop.getY()), shop.getId().toString());
+            }
+        }
     }
 }

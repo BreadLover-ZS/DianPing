@@ -45,21 +45,14 @@ public class BlogController {
             blog.setContent(HtmlUtil.escape(blog.getContent()));
         }
 
-        // 获取登录用户
-        UserDTO user = UserHolder.getUser();
-        blog.setUserId(user.getId());
-        // 保存探店博文
-        blogService.save(blog);
-        // 返回id
-        return Result.ok(blog.getId());
+        // 保存探店博文并推送到粉丝收件箱（Feed流），逻辑下沉至 Service
+        return blogService.saveBlog(blog);
     }
 
     @PutMapping("/like/{id}")
     public Result likeBlog(@PathVariable("id") Long id) {
-        // 修改点赞数量
-        blogService.update()
-                .setSql("liked = liked + 1").eq("id", id).update();
-        return Result.ok();
+        // 点赞/取消点赞，逻辑下沉至 Service（基于 Redis ZSet 实现一人一赞）
+        return blogService.likeBlog(id);
     }
 
     @GetMapping("/of/me")
@@ -90,5 +83,57 @@ public class BlogController {
             blog.setIcon(user.getIcon());
         });
         return Result.ok(records);
+    }
+
+    /**
+     * 根据id查询博客详情
+     *
+     * @param id 博客id
+     * @return 博客详情（含作者信息、当前用户是否点赞）
+     */
+    @GetMapping("/{id}")
+    public Result queryBlogById(@PathVariable("id") Long id) {
+        return blogService.queryBlogById(id);
+    }
+
+    /**
+     * 查询博客的点赞用户列表（top5）
+     *
+     * @param id 博客id
+     * @return 点赞用户列表（UserDTO）
+     */
+    @GetMapping("/likes/{id}")
+    public Result queryBlogLikes(@PathVariable("id") Long id) {
+        return blogService.queryBlogLikes(id);
+    }
+
+    /**
+     * 根据用户id查询其博客列表
+     *
+     * @param id      用户id
+     * @param current 页码
+     * @return 博客列表
+     */
+    @GetMapping("/of/user")
+    public Result queryBlogByUserId(
+            @RequestParam("id") Long id,
+            @RequestParam(value = "current", defaultValue = "1") Integer current
+    ) {
+        return blogService.queryBlogByUserId(id, current);
+    }
+
+    /**
+     * 查询当前用户收件箱中的关注推送（Feed流，滚动分页）
+     *
+     * @param lastId 上次查询的最小时间戳
+     * @param offset 偏移量
+     * @return 滚动分页结果
+     */
+    @GetMapping("/of/follow")
+    public Result queryBlogOfFollow(
+            @RequestParam("lastId") Long lastId,
+            @RequestParam(value = "offset", defaultValue = "0") Integer offset
+    ) {
+        return blogService.queryBlogOfFollow(lastId, offset);
     }
 }
