@@ -90,6 +90,27 @@ Feed：
 | 附近商铺 | GEO | 经纬度半径查询和距离排序 |
 | 签到 | BitMap | 每天只占一个 bit |
 
+### 1.5 模块关系与数据库约束
+
+```text
+User ──< Blog ──< BlogComments
+  │       │
+  └──< Follow >── User
+
+ShopType ──< Shop ──< Voucher ── SeckillVoucher
+User ──< VoucherOrder >── Voucher
+```
+
+| 表 | 已有约束/索引 | 面试时必须说明的影响 |
+| --- | --- | --- |
+| `tb_user` | 手机号唯一索引 | 自动注册时可避免相同手机号最终重复落库，但业务仍应处理并发插入异常。 |
+| `tb_follow` | `(user_id, follow_user_id)` 唯一索引；`follow_user_id` 索引 | 数据库可最终拒绝重复关注，按被关注者查询粉丝也有索引支撑。 |
+| `tb_seckill_voucher` | `voucher_id` 主键 | 一张券只对应一条秒杀库存记录。 |
+| `tb_shop` | `type_id` 索引 | 按商铺分类查询具备基础索引。 |
+| `tb_voucher_order` | 只有订单主键 | **没有** `(user_id, voucher_id)` 唯一约束，无法作为“一人一单”的最终数据库兜底。 |
+
+初始化 SQL 已经包含关注索引，而 `db/migration/20260803_add_follow_indexes.sql` 也会尝试创建它们。新环境执行完整初始化脚本后，不能不加检查地再次执行迁移脚本。项目目前没有自动迁移框架，后续应引入 Flyway/Liquibase，或至少建立迁移登记和幂等检查规范。
+
 ---
 
 ## 2. P0 高频题：项目、架构与真实性
@@ -298,6 +319,13 @@ Feed 会持续新增数据，普通页码分页可能因数据插入发生重复
 
 推模式发布时写入粉丝收件箱，读快但大 V 会产生写放大；拉模式读取时聚合关注人的内容，写简单但读放大。当前项目使用纯推模式，生产中可对普通用户推、对大 V 拉，形成推拉结合。
 
+### 补充：商铺分类缓存和评论链路
+
+- 商铺分类列表使用 Redis List。缓存未命中时查询 MySQL 并整体写入；**[当前缺口]** 分类后台变更时还缺少明确的主动失效或重建策略。
+- 新增评论在事务中写入 `tb_blog_comments`，再使用 `comments = COALESCE(comments, 0) + 1` 原子递增笔记评论数；计数更新失败会抛出异常并回滚。
+- 评论列表当前按创建时间倒序直接查询。增加回复树、审核、用户展示或高频点赞后，需要重新设计 DTO、索引、分页和计数一致性。
+- GEO 首次缺少对应 Key 时会加载同类型商铺坐标；**[当前缺口]** 并发首次加载可能重复执行，也没有完整的商铺坐标更新后 GEO 同步链路。
+
 ---
 
 ## 6. 秒杀与并发
@@ -360,7 +388,7 @@ Controller 调用 `seckillVoucher`，先查询优惠券并校验开始时间、�
 
 **参考答案：**
 
-Spring 事务通常通过 AOP 代理实现，同一个对象内部用 `this` 调用事务方法不会经过代理。当前代码使用 `AopContext.currentProxy()` 获取代理后调用事务方法。更清晰的改法是把事务方法拆到另一个 Service 中注入调用。
+Spring 事务通常通过 AOP 代理实现，同一个对象内部用 `this` 调用事务方法不会经过代理。当前启动类通过 `@EnableAspectJAutoProxy(exposeProxy = true)` 暴露代理，业务代码再使用 `AopContext.currentProxy()` 获取代理并调用事务方法。更清晰的改法是把事务方法拆到另一个 Service 中注入调用，这样可读性和测试性更好。
 
 ### 43. `@Transactional` 是锁吗？
 
@@ -397,6 +425,8 @@ Redis 锁可能因过期、故障、实现缺陷或运维操作失效。数据�
 **参考答案：**
 
 缺少订单联合唯一索引和异步削峰；锁租约固定且没有续期；事务方法没有检查 `save(voucherOrder)` 的返回值；异常被统一转换为“下单失败”，可观测性不足；Redis、订单和库存之间也缺少完整失败补偿及对账机制。
+
+此外，`RedisConstants.SECKILL_STOCK_KEY` 虽然存在，但当前秒杀入口没有使用它做 Redis 库存预扣，也没有 Redis Stream、RabbitMQ 或其他异步消费者。常量存在不等于异步秒杀已经启用。
 
 ---
 
@@ -534,11 +564,23 @@ Redis 和数据库可能不一致，Redis 锁也可能失效。订单最终写�
 
 ---
 
-## 12. 更新记录
+## 12. 建议的源码阅读与实操顺序
+
+1. **认证主线**：`MvcConfig` → 两个拦截器 → `UserHolder` → `UserServiceImpl`。独立画出 Token 创建、续期、登出和 ThreadLocal 清理流程。
+2. **商铺主线**：`ShopController` → `ShopServiceImpl` → `CacheClient`。分别请求存在和不存在的商铺，观察普通缓存和空值缓存。
+3. **社交主线**：阅读 `BlogServiceImpl` 和 `FollowServiceImpl`，写清每个 ZSet 的 member、score，以及 Feed 的 `lastId + offset`。
+4. **秒杀主线**：`VoucherOrderServiceImpl` → `SimpleRedisLock` → SQL 条件更新 → `RedisIdWorker`。用并发请求验证库存不为负，并检查重复订单风险。
+5. **表与索引**：对主要查询执行 `EXPLAIN`，观察索引、回表、排序和范围扫描，而不是只背表结构。
+6. **开始二开**：先为 RabbitMQ 改造写验收条件、失败矩阵和数据库迁移，再修改生产者、消费者和测试，最后分别核对 Redis、RabbitMQ 与 MySQL 状态。
+
+---
+
+## 13. 更新记录
 
 | 日期 | 基线 | 变更 | 证据状态 |
 | --- | --- | --- | --- |
 | 2026-08-18 | `5876354` | 建立 50 题面试题库、事实边界、二开清单和源码地图 | 已回扣当前源码与 SQL；未声称真实生产压测 |
+| 2026-08-19 | `aa7392d` + `33a0303` | 合并历史面试指南，补回数据库约束、分类缓存、评论链路、GEO 同步边界、Redis 秒杀事实与实操顺序 | 文档合并；代码能力没有因此发生变化 |
 
 后续更新建议使用以下格式：
 
