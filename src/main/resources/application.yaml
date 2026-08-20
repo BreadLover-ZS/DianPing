@@ -21,14 +21,66 @@ spring:
         max-idle: 10
         min-idle: 1
         time-between-eviction-runs: 10s
+  rabbitmq:
+    # 默认连接本机开发环境；部署时通过环境变量注入连接信息
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    connection-timeout: 3s
+    # 开启相关发布确认和不可路由消息返回；业务回调将在生产者步骤实现
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      # 无法路由到队列时，把消息退回生产者
+      mandatory: true
+
+      # 处理连接失败、发送异常等同步故障
+      retry:
+        enabled: true
+
+        # 第一次发送 + 三次重试
+        max-attempts: 4
+
+        # 三次重试间隔约为 1 秒、2 秒、4 秒
+        initial-interval: 1s
+        multiplier: 2
+        max-interval: 4s
+    listener:
+      simple:
+        # 监听方法正常返回后由 Spring ACK；抛出异常则不确认
+        acknowledge-mode: auto
+
+        # 同一队列使用多个消费者线程提高订单消费并发度；
+        # 最终吞吐仍受数据库连接池和库存行竞争限制。
+        concurrency: 3
+        max-concurrency: 10
+        prefetch: 10
+
+        # 重试耗尽后拒绝消息且不重新入主队列，使其进入 DLQ
+        default-requeue-rejected: false
+
+        retry:
+          enabled: true
+
+          # 包含第一次消费：1 次初始消费 + 3 次重试
+          max-attempts: 4
+
+          # 三次重试前分别等待约 1 秒、2 秒、4 秒
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 4s
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
 mybatis-plus:
   type-aliases-package: com.dish.review.entity # 别名扫描包
 # 自定义业务配置
 dish-review:
-  # 验证码发送模式: test=测试模式(接口直接返回验证码,便于本地联调) prod=生产模式(接入真实短信通道)
   sms-code-mode: test
+  seckill:
+    rabbit-consumer-enabled: ${SECKILL_RABBIT_CONSUMER_ENABLED:false}
+    publish-retry-delay: ${SECKILL_PUBLISH_RETRY_DELAY:1000}
 logging:
   level:
     # 【安全修复】生产环境使用 info 级别，避免 debug 日志泄露敏感信息

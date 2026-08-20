@@ -25,7 +25,8 @@ User --< VoucherOrder >-- Voucher
 | `tb_blog` / `tb_blog_comments`      | 探店内容与评论  | 热门排序、作者信息回填、点赞计数                           |
 | `tb_follow`                         | 关注关系     | `(user_id, follow_user_id)` 唯一索引；同时有被关注者索引 |
 | `tb_voucher` / `tb_seckill_voucher` | 普通券与秒杀库存 | 秒杀表以 `voucher_id` 为主键                      |
-| `tb_voucher_order`                  | 秒杀订单     | 目前只有订单主键；没有 `(user_id, voucher_id)` 唯一约束   |
+| `tb_voucher_order`                  | 秒杀订单     | `(user_id, voucher_id)` 联合唯一索引兜底一人一单       |
+| `tb_seckill_order_event`            | 秒杀消息事件   | `event_id` 主键、`order_id` 唯一、状态与补偿时间索引       |
 
 ## 3. 业务链路
 
@@ -88,32 +89,30 @@ GET /shop/{id}
 
 关注关系以 MySQL 为事实源、Redis Set 为共同关注加速结构：关注写库后同步 Set，取消关注时同时删除；共同关注使用 Redis Set 交集后回查用户 DTO。数据库的关注联合唯一索引会将并发重复关注转为可处理的重复键异常。
 
-### 3.4 秒杀下单：锁、条件更新与事务
+### 3.4 秒杀下单：Lua 预扣、事件状态与 RabbitMQ
 
 ```text
 POST /voucher-order/seckill/{voucherId}
-  -> 校验秒杀时间与初始库存
-  -> 获取 lock:order:{userId}
-  -> 通过 AopContext 调用事务代理
-  -> 查询是否已有该用户/券订单
-  -> UPDATE stock = stock - 1 WHERE voucher_id = ? AND stock > 0
-  -> RedisIdWorker 生成订单 ID
-  -> 保存订单
-  -> finally 释放锁
+  -> 校验登录、秒杀时间窗
+  -> Lua 原子判断库存/用户集合并预扣
+  -> 生成 orderId/eventId，写 tb_seckill_order_event(PENDING)
+  -> RabbitMQ 持久化发布，Confirm/Return 更新事件状态
+  -> 消费者事务内条件扣 MySQL 库存、写订单、标记 CONSUMED
+  -> 发布结果未知时按 1/2/4 秒补偿；消费重试耗尽进入 DLQ
 ```
 
-这里是混合并发控制，不应简单说成只用了乐观锁或悲观锁：
+这里仍然是分层并发控制，不应简单说成只用了乐观锁或悲观锁：
 
 | 目标            | 当前做法                                      | 准确分类                       |
 | ------------- | ----------------------------------------- | -------------------------- |
-| 防止同一用户并发重复提交  | `SimpleRedisLock` 的 `SETNX + TTL`         | 悲观式 Redis 分布式锁             |
-| 防止库存扣成负数      | `stock > 0` 条件更新，以影响行数判断成功                | 乐观式条件更新；不是 `@Version` 版本号锁 |
-| 保证扣库存与建订单同成同败 | `createVoucherOrder()` 的 `@Transactional` | 事务边界，不是锁                   |
+| 防止同一用户重复预扣 | Lua 对库存和用户 Set 的原子判断 | Redis 脚本原子性 |
+| 防止数据库超卖 | 消费者 `stock > 0` 条件更新，以影响行数判断成功 | 乐观式条件更新；不是 `@Version` 版本号锁 |
+| 保证数据库步骤同成同败 | `VoucherOrderHandler.createOrder()` 的 `@Transactional` | 事务边界，不是锁 |
 | 多实例订单 ID 唯一   | Redis `INCR` + 时间戳高位                      | 分布式 ID 生成                  |
 
-`SimpleRedisLock` 的 Value 包含应用 UUID 和线程 ID，释放时通过 Lua 脚本原子比较持有者并删除，避免误删他人锁。锁按用户而非券加，能限制重复下单，但会让同一用户购买不同券时互相等待。
+数据库已增加 `(user_id, voucher_id)` 联合唯一索引，Redis 锁失效或消息重复消费时仍可拒绝重复订单；业务代码还需把重复键识别为幂等结果。
 
-当前风险也要如实说明：`tb_voucher_order` 缺少 `(user_id, voucher_id)` 唯一约束，Redis 锁过期、故障或旁路调用时，没有数据库唯一索引做最终兜底；应作为后续优化，而不能说成已经完成。
+RabbitMQ 改造已经接入入口、消费者、事件状态和有限补偿；真实 RabbitMQ 连接、并发压测与故障演练仍需单独验收。
 
 ## 4. Redis 使用总表
 
@@ -129,10 +128,12 @@ POST /voucher-order/seckill/{voucherId}
 | `feed:*` ZSet                 | 粉丝收件箱与滚动分页                  | `BlogServiceImpl`               |
 | `follows:*` Set               | 关注集合与共同关注                   | `FollowServiceImpl`             |
 | `sign:*` Bitmap               | 月度签到与连续签到统计                 | `UserServiceImpl`               |
-| `lock:order:*` String         | 秒杀用户分布式锁                    | `VoucherOrderServiceImpl`       |
+| `lock:order:*` String         | 历史同步秒杀用户锁（当前异步入口不使用） | `SimpleRedisLock`（保留实现） |
 | `icr:order:yyyy:MM:dd` String | 订单号自增序列                     | `RedisIdWorker`                 |
+| `seckill:stock:{id}` String   | Lua 预校验与预扣库存                  | `SeckillVoucherLuaExecutor`、`VoucherOrderServiceImpl` |
+| `seckill:order:{id}` Set      | Lua 判断一人一单                     | `SeckillVoucherLuaExecutor`、`VoucherOrderServiceImpl` |
 
-补充边界：`SECKILL_STOCK_KEY` 在常量中存在，但当前秒杀库存扣减走 MySQL 条件更新；不能据此宣称项目已实现 Redis 预扣库存。
+补充边界：Java 只使用带花括号的 Key；消费者默认由 `SECKILL_RABBIT_CONSUMER_ENABLED` 控制，远端 RabbitMQ 未监听时不要开启。历史的不带花括号 Key 仍可能保留，不能与当前 Key 混用。
 
 ## 5. 安全、测试与部署现状
 
@@ -152,7 +153,7 @@ POST /voucher-order/seckill/{voucherId}
 | 凭据    | 配置应仅通过环境变量/密钥管理提供                                | 不在仓库保留真实账号、密码或地址；上线前轮换已暴露的密钥          |
 | HTTPS | Nginx 的 HTTPS 示例仍为注释配置                           | 真实证书、跳转、TLS 验证后才可宣称启用 HTTPS           |
 | 缓存重建锁 | `CacheClient` / `ShopServiceImpl` 的旧辅助锁写固定值并直接删除 | 若启用该方案，应复用带持有者标识和 Lua 解锁的实现           |
-| 秒杀幂等  | Redis 用户锁 + 事务内查询                                | 增加订单联合唯一索引，并处理重复键结果                   |
+| 秒杀幂等  | Redis Lua 用户集合 + 消费者查询 + 数据库联合唯一索引 | 增加重复投递、ACK 丢失和并发场景的真实验收 |
 | 测试    | 有 Spring 上下文、功能与安全相关 JUnit 测试                    | 增加真实 Redis/MySQL 集成测试、并发压测、接口级回归与发布验收 |
 | 部署    | Nginx -> 本机 Spring Boot；配置依赖外部 MySQL/Redis       | 用独立环境变量、健康检查、日志/监控和备份恢复验证             |
 
@@ -160,7 +161,7 @@ POST /voucher-order/seckill/{voucherId}
 
 ### 30 秒版本
 
-> 这是一个基于 Spring Boot、MyBatis-Plus、MySQL 和 Redis 的餐饮点评项目，包含登录、商铺查询、附近商铺、博客互动、关注 Feed 和秒杀下单。Redis 同时承担会话、缓存、排行榜/收件箱、分布式锁和订单 ID 生成职责。我重点理解了商铺缓存穿透、基于 ZSet 的互动数据、以及秒杀中 Redis 用户锁、MySQL 条件扣库存和事务的组合。
+> 这是一个基于 Spring Boot、MyBatis-Plus、MySQL、Redis 和 RabbitMQ 的餐饮点评项目。我重点理解了缓存、Feed 和秒杀调用链；当前秒杀入口使用 Redis Lua 预扣、事件表和 RabbitMQ 异步落库，并通过唯一索引和消费者幂等兜底。真实依赖和并发验收仍需补充。
 
 ### 追问要点
 
@@ -168,7 +169,7 @@ POST /voucher-order/seckill/{voucherId}
 | ------------ | --------------------------------------------------------- |
 | 商铺缓存如何防穿透？   | 缓存未命中回源数据库；不存在时缓存空字符串并设置较短 TTL。                           |
 | 缓存击穿如何处理？    | 代码保留逻辑过期和互斥重建方案；但默认入口当前采用缓存穿透方案，不能混淆。                     |
-| 一人一单如何保证？    | Redis 用户锁限制并发提交，事务内查询重复订单；数据库联合唯一索引尚未补齐，是后续兜底。            |
+| 一人一单如何保证？    | Redis Lua 用户集合先拦截，消费者查询和数据库联合唯一索引最终兜底；重复消息按幂等成功处理。            |
 | 为什么库存不超卖？    | 最终由 `UPDATE ... WHERE stock > 0` 的原子条件更新决定；影响行数为 0 即失败。   |
 | 锁是乐观还是悲观？    | 用户 Redis 锁是悲观分布式锁；库存扣减是乐观式条件更新；事务不是锁。                     |
 | 登录用户如何跨请求传递？ | Token 在 Redis Hash 中映射 UserDTO；刷新拦截器写入 ThreadLocal，结束后清理。 |
@@ -183,7 +184,7 @@ POST /voucher-order/seckill/{voucherId}
 2. 解释 Token Hash、滑动 TTL、ThreadLocal 清理各自解决什么问题。
 3. 解释 ZSet 在点赞与 Feed 中的不同 score、查询和分页用途。
 4. 解释 Redis 锁、条件扣库存、事务三者分别保障什么。
-5. 说清当前秒杀订单唯一约束的缺口与安全补救方式。
+5. 说清历史 Redis 用户锁、当前 Lua 用户集合与数据库唯一索引各自的边界。
 6. 区分默认商铺缓存入口与保留的逻辑过期/互斥锁辅助实现。
 7. 说清上线前还必须验证的 HTTPS、凭据、并发、真实依赖和接口回归。
 

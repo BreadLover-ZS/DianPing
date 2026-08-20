@@ -25,7 +25,7 @@
 
 ## 项目简介
 
-DishReview 是一款基于 **Java 8 + Spring Boot 2.3 + MyBatis-Plus + MySQL + Redis** 构建的餐饮点评平台。用户可以通过手机号验证码或密码登录，浏览按类型分类的商铺、查看附近 5 公里内的店铺、发布探店笔记、点赞评论、关注其他用户并接收关注 Feed 流推送，还能参与店铺优惠券的秒杀活动。
+DishReview 是一款基于 **Java 8 + Spring Boot 2.3 + MyBatis-Plus + MySQL + Redis + RabbitMQ** 构建的餐饮点评平台。当前实现已将秒杀入口接入 Redis Lua 预扣、事件持久化和 RabbitMQ 异步投递；消费者默认由环境变量控制，真实 RabbitMQ 连接和并发验收仍需单独完成。
 
 项目将典型的互联网业务场景与 Redis 高级数据结构深度结合，是学习和实践 **缓存设计、分布式锁、Feed 流、基于 GEO 的 LBS 查询、BitMap 签到、全局唯一 ID 生成** 等技术的完整参考实现。
 
@@ -45,7 +45,7 @@ DishReview 是一款基于 **Java 8 + Spring Boot 2.3 + MyBatis-Plus + MySQL + R
 | Feed 流 | 关注的人发布笔记后推送到粉丝收件箱（ZSet 推模式），滚动分页查询（score + offset） |
 | 评论 | 笔记评论列表、新增评论并同步评论计数 |
 | 优惠券 | 普通券/秒杀券管理，店铺优惠券查询 |
-| 秒杀 | 秒杀下单：一人一单、原子扣库存、Redis 分布式锁 + Lua 原子解锁、全局唯一订单 ID |
+| 秒杀 | 时间窗校验、Redis Lua 原子预扣、PENDING 事件、RabbitMQ 异步消费、MySQL 条件扣库存与一人一单唯一索引 |
 | 文件上传 | 博客图片上传（类型白名单 + 5MB 大小限制）、删除（路径穿越防护） |
 
 ---
@@ -61,9 +61,10 @@ DishReview 是一款基于 **Java 8 + Spring Boot 2.3 + MyBatis-Plus + MySQL + R
 | MyBatis-Plus | 3.4.3 | ORM / 分页插件 |
 | MySQL | 5.6+（mysql-connector-java 5.1.47） | 关系型数据库 |
 | Spring Data Redis (Lettuce + commons-pool2) | Spring Boot 内置 | Redis 客户端 |
+| Spring AMQP / RabbitMQ | Spring Boot 内置 / 3.13 | 秒杀订单可靠投递、有限重试与死信 |
 | Hutool | 5.7.17 | 工具库（JSON、加密、随机数等） |
 | Lombok | 内置 | 简化实体代码 |
-| AspectJ | 内置 | 开启 AopContext 代理支持（秒杀事务） |
+| AspectJ | 内置 | 提供 Spring AOP 支持；当前秒杀事务位于独立的 `VoucherOrderHandler` Bean |
 
 ### 前端与部署
 
@@ -139,6 +140,7 @@ dishreview/
 │   ├── conf/nginx.conf                  # Nginx 站点配置（含安全响应头）
 │   └── html/dishreview/                 # 前端页面（HTML/CSS/JS 静态资源）
 └── docs/learning/                       # 项目学习笔记
+    └── 09-rabbitmq-seckill-flow.md      # RabbitMQ 秒杀链路与验收
 ```
 
 ---
@@ -158,10 +160,11 @@ dishreview/
 | `tb_follow` | 关注关系 | `uk_user_follow(user_id, follow_user_id)` 唯一索引；`idx_follow_user_id` 被关注者索引 |
 | `tb_voucher` | 优惠券（普通券/秒杀券） | `shop_id` |
 | `tb_seckill_voucher` | 秒杀券库存与时间窗 | 以 `voucher_id` 为主键，与券一对一 |
-| `tb_voucher_order` | 秒杀订单 | 订单 ID 由 RedisIdWorker 生成 |
+| `tb_voucher_order` | 秒杀订单 | RedisIdWorker 生成 ID；`uk_voucher_order_user_voucher(user_id, voucher_id)` 保证一人一单 |
+| `tb_seckill_order_event` | 秒杀消息事件 | PENDING/CONFIRMED/CONSUMED/FAILED 状态、发布补偿与消费失败记录 |
 | `tb_sign` | 签到表（预留，签到实际存储于 Redis BitMap） | — |
 
-> 增量脚本 `db/migration/20260803_add_follow_indexes.sql` 为 `tb_follow` 补充唯一索引与查询索引，首次部署时需人工执行（项目未内置自动迁移框架）。
+> 增量脚本位于 `db/migration/`：关注索引和订单一人一单唯一索引均已提供；项目未内置自动迁移框架，执行前需检查目标环境。
 
 ---
 
@@ -173,6 +176,7 @@ dishreview/
 | Maven | 3.6+ | 依赖管理与构建 |
 | MySQL | 5.6+ | 数据库 |
 | Redis | 5.0+ | 需支持 GEO（3.2+）、BitField、SetNx 等命令 |
+| RabbitMQ | 3.13（当前开发环境） | 秒杀消息投递与消费；消费者由 `SECKILL_RABBIT_CONSUMER_ENABLED` 控制 |
 | Nginx | 1.18（可选） | 前端托管与反向代理；纯后端调试可跳过 |
 
 **默认连接配置**：`application.yaml` 默认指向远程服务器 `115.29.220.133`（MySQL/Redis），可通过环境变量覆盖：
@@ -183,6 +187,9 @@ dishreview/
 | `MYSQL_USER` / `MYSQL_PASSWORD` | `root` / `MyStudy@2026_Sql` | MySQL 账号密码 |
 | `REDIS_HOST` / `REDIS_PORT` | `115.29.220.133` / `6379` | Redis 地址 |
 | `REDIS_PASSWORD` | `MyStudy@2026_Sql` | Redis 密码 |
+| `RABBITMQ_HOST` / `RABBITMQ_PORT` | `localhost` / `5672` | RabbitMQ 地址；云服务器部署时必须显式配置 |
+| `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` | `guest` / `guest` | RabbitMQ 账号；不要在生产环境使用默认账号 |
+| `SECKILL_RABBIT_CONSUMER_ENABLED` | `false` | RabbitMQ 可达且拓扑确认后设为 `true` |
 
 > ⚠️ 请勿在生产环境使用默认密码。建议通过环境变量注入密钥，或直接修改 `application.yaml`。
 
@@ -202,6 +209,8 @@ mysql -u root -p < src/main/resources/db/dish_review.sql
 
 ```bash
 mysql -u root -p dish_review < src/main/resources/db/migration/20260803_add_follow_indexes.sql
+mysql -u root -p dish_review < src/main/resources/db/migration/20260819_add_voucher_order_unique_index.sql
+mysql -u root -p dish_review < src/main/resources/db/migration/20260820_add_seckill_order_event.sql
 ```
 
 ### 2. 配置连接信息
@@ -369,13 +378,14 @@ Feed 流滚动分页示例（首次 `lastId=当前时间戳, offset=0`，后续�
 - **缓存击穿**：`queryWithLogicalExpire` 采用**逻辑过期**方案，过期后通过互斥锁（SETNX）只允许一个线程回源数据库并异步重建缓存，其余请求先返回旧数据，保证高并发下缓存雪崩保护。
 - **缓存一致性**：商铺更新采用「先更新数据库、再删除缓存」策略。
 
-### 2. 秒杀：一人一单 + 原子扣减
+### 2. 秒杀：Lua 预扣 + RabbitMQ 异步落库
 
 - 时间窗校验（未开始/已结束直接拒绝）。
-- `SimpleRedisLock`（SETNX + 超时 + 应用级 UUID 标识持有者）为**同一用户**的并发下单加锁，防止超卖下的重复下单。
-- `createVoucherOrder` 通过 `AopContext.currentProxy()` 获取事务代理，确保 `@Transactional` 生效。
-- 扣库存使用条件更新 `stock > 0` 且 `stock = stock - 1`，保证原子性与不超卖。
-- 释放锁使用 **Lua 脚本**「校验持有者 + 删除」原子执行，避免误删他人锁。
+- 请求先校验活动时间，再调用 `SeckillVoucherLuaExecutor` 原子扣减 Redis 库存并记录用户集合。
+- 预扣成功后写入 `tb_seckill_order_event` 的 `PENDING` 记录，再用持久化消息和 `CorrelationData` 发布到 RabbitMQ。
+- Confirm ACK 标记 `CONFIRMED`；NACK/Return 先标记 `FAILED`，成功后用回滚 Lua 恢复库存和用户集合。
+- 发布结果未知时由事件表按 1、2、4 秒有限补偿；消费者事务内条件扣 MySQL 库存、写订单并标记 `CONSUMED`。
+- 数据库联合唯一索引和消费者重复键分支共同保证幂等；监听重试耗尽的消息进入死信队列。
 
 ### 3. Feed 流：推模式 + 滚动分页
 
