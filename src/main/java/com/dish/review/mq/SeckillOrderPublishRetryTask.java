@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * 补偿生产者无法确定发送结果的秒杀订单事件。
  *
- * <p>只有 PENDING 且到达 next_retry_time 的事件会被处理；
+ * <p>只有 PENDING/PUBLISH_UNKNOWN 且到达 next_retry_time 的事件会被处理；
  * 事件本身保留原 orderId/eventId，重发仍然依靠消费端幂等。</p>
  */
 @Slf4j
@@ -33,7 +33,7 @@ public class SeckillOrderPublishRetryTask {
     }
 
     /**
-     * 周期扫描到期 PENDING 事件；抢占成功后重发，异常则安排下一次有限重试。
+     * 周期扫描到期事件；快速补偿耗尽后转为低频慢重试，直到回调使状态收敛。
      */
     @Scheduled(
             fixedDelayString = "${dish-review.seckill.publish-retry-delay:1000}"
@@ -51,8 +51,9 @@ public class SeckillOrderPublishRetryTask {
             try {
                 orderPublisher.publish(message);
                 log.info(
-                        "已重新投递秒杀订单事件，eventId={}，retryCount={}",
+                        "已重新投递秒杀订单事件，eventId={}，status={}，retryCount={}",
                         event.getEventId(),
+                        event.getStatus(),
                         event.getRetryCount()
                 );
             } catch (Exception exception) {
@@ -63,7 +64,7 @@ public class SeckillOrderPublishRetryTask {
 
                 if (!handled) {
                     log.error(
-                            "秒杀订单事件补偿重试耗尽或状态更新失败，eventId={}",
+                            "秒杀订单事件无法安排下一次补偿，eventId={}",
                             event.getEventId(),
                             exception
                     );

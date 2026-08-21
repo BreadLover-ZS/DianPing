@@ -11,8 +11,8 @@ CREATE TABLE IF NOT EXISTS tb_seckill_order_event
     created_at      bigint(20) UNSIGNED NOT NULL COMMENT '消息创建时间，Unix 毫秒',
     message_version tinyint(3) UNSIGNED NOT NULL DEFAULT 1 COMMENT '消息版本',
     status          tinyint(3) UNSIGNED NOT NULL DEFAULT 0
-        COMMENT '0=PENDING，1=CONFIRMED，2=CONSUMED，3=FAILED',
-    retry_count     int(10) UNSIGNED    NOT NULL DEFAULT 0 COMMENT '补偿重试次数',
+        COMMENT '0=PENDING，1=CONFIRMED，2=CONSUMED，3=FAILED，4=PUBLISH_UNKNOWN',
+    retry_count     int(10) UNSIGNED    NOT NULL DEFAULT 0 COMMENT '高层 publish 调用次数',
     next_retry_time timestamp           NULL     DEFAULT NULL COMMENT '下次补偿时间',
     last_error      varchar(512)                 DEFAULT NULL COMMENT '最近失败原因',
     create_time     timestamp           NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',

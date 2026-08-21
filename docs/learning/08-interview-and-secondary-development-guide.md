@@ -428,7 +428,7 @@ Redis 锁可能因过期、故障、实现缺陷或运维操作失效。数据�
 
 ### 6.1 RabbitMQ 秒杀改造面试追问（正在二次开发）
 
-> **事实边界：** 已完成：交换机/队列/死信、JSON 持久化消息、Confirm/Return、事件状态表、Lua 预扣/回滚、消费者事务幂等、发布补偿和监听重试耗尽入 DLQ。未完成：远端 RabbitMQ 可达性、真实并发/故障验收、死信人工处理和完整对账。
+> **事实边界：** 已完成：交换机/队列/死信、JSON 持久化消息、Confirm/Return、事件状态表、Lua 预扣/回滚、消费者事务幂等、发布快速补偿、PUBLISH_UNKNOWN 低频重发和监听重试耗尽入 DLQ。未完成：远端 RabbitMQ 可达性、真实并发/故障验收、死信人工处理和完整对账。
 
 #### R1. 秒杀订单为什么选择 DirectExchange，而不是 FanoutExchange 或 TopicExchange？
 

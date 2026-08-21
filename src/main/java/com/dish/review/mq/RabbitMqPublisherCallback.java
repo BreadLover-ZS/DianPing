@@ -292,20 +292,21 @@ public class RabbitMqPublisherCallback
     }
 
     /**
-     * 尽力持久化 FAILED；只有保存成功时，调用方才允许回滚 Redis。
+     * 仅在没有补偿历史时持久化确定的发布失败；
+     * 已补偿事件的单次 NACK/Return 不能证明此前消息均未到达 Broker。
      */
     private boolean markEventFailed(
             String eventId,
             String errorMessage) {
         try {
-            boolean marked = eventService.markFailed(
+            boolean marked = eventService.markInitialPublishFailed(
                     eventId,
                     errorMessage
             );
 
             if (!marked) {
-                log.error(
-                        "RabbitMQ 发布失败，但事件状态无法更新，eventId={}",
+                log.warn(
+                        "RabbitMQ 单次发布失败，但事件已有补偿历史或状态已收敛，不直接回滚，eventId={}",
                         eventId
                 );
             }

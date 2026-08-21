@@ -53,6 +53,7 @@ public class VoucherOrderServiceImpl
      */
     @Override
     public Result seckillVoucher(Long voucherId) {
+        //初步判断该用户能否下单该优惠券
         if (voucherId == null || voucherId <= 0) {
             return Result.fail("优惠券参数错误");
         }
@@ -78,6 +79,8 @@ public class VoucherOrderServiceImpl
             return Result.fail("秒杀已结束！");
         }
 
+        //执行lua脚本：预扣除库存，并且将用户加入到已购用户集合
+        //这里可以保证，用户只能下单一次
         Long reserveResult;
         try {
             reserveResult = luaExecutor.reserve(voucherId, user.getId());
@@ -107,6 +110,7 @@ public class VoucherOrderServiceImpl
             return Result.fail("秒杀失败，请稍后重试");
         }
 
+        //通过redis获取分布式ID
         Long orderId = redisIdWorker.nextId("order");
         SeckillOrderMessage message = new SeckillOrderMessage(
                 UUID.randomUUID().toString(),
@@ -117,6 +121,7 @@ public class VoucherOrderServiceImpl
                 1
         );
 
+        //创建对应的event数据，记录订单的状态，用于后续回调
         try {
             eventService.createPending(message);
         } catch (Exception exception) {
@@ -129,9 +134,27 @@ public class VoucherOrderServiceImpl
             return Result.fail("下单失败，请稍后重试");
         }
 
+        //生产消息：发送给消息队列，异步处理
         try {
             orderPublisher.publish(message);
         } catch (Exception exception) {
+            /**
+             * 发送消息抛异常
+             *   → 不能确定消息是否已经到达 RabbitMQ
+             *   → 不立即恢复 Redis 库存
+             *   → 根据 eventId 安排事件表补偿重试
+             *   → 记录执行结果
+             *   → 方法继续执行
+             */
+
+            /**补偿任务：scheduleRetry
+             * 处理：Redis 已经预扣、PENDING 事件已经落库，但生产者无法确认消息是否成功发送到 RabbitMQ。
+             * 过程：扫描到期的 PENDING 事件
+             *   → 抢占事件并设置 30 秒租约
+             *   → 用事件表数据重建原消息
+             *   → 使用原 eventId/orderId 重新发布
+             *   → 等待 Confirm 回调更新状态
+             */
             boolean scheduled = eventService.scheduleRetry(
                     message.getEventId(),
                     exception.getMessage()

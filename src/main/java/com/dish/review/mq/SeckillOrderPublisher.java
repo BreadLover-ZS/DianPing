@@ -1,6 +1,7 @@
 package com.dish.review.mq;
 
 import com.dish.review.dto.SeckillOrderMessage;
+import com.dish.review.service.SeckillOrderEventService;
 import com.dish.review.utils.RabbitMqConstants;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -13,19 +14,26 @@ import org.springframework.stereotype.Component;
 public class SeckillOrderPublisher {
 
     private final RabbitTemplate rabbitTemplate;
+    private final SeckillOrderEventService eventService;
 
-    /**
-     * 注入统一的 RabbitTemplate，复用项目配置的 JSON 转换和发布确认。
-     */
-    public SeckillOrderPublisher(RabbitTemplate rabbitTemplate) {
+    /** 注入 RabbitTemplate 和事件服务，发送前先持久化本次 publish 调用。 */
+    public SeckillOrderPublisher(
+            RabbitTemplate rabbitTemplate,
+            SeckillOrderEventService eventService) {
         this.rabbitTemplate = rabbitTemplate;
+        this.eventService = eventService;
     }
 
-    /**
-     * 校验消息后发布，并写入回调定位所需的 CorrelationData 和 Header。
-     */
+    /** 校验消息、记录发布次数，再写入 CorrelationData/Header 并发送。 */
     public void publish(SeckillOrderMessage message) {
         validate(message);
+
+        if (!eventService.recordPublishAttempt(message.getEventId())) {
+            throw new IllegalStateException(
+                    "无法记录秒杀订单发布尝试，eventId="
+                            + message.getEventId()
+            );
+        }
 
         SeckillOrderCorrelationData correlationData =
                 new SeckillOrderCorrelationData(message);

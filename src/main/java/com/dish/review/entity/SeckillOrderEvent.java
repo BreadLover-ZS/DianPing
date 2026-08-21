@@ -41,5 +41,7 @@ public class SeckillOrderEvent implements Serializable {
     public static final int STATUS_CONSUMED = 2;
     /** 发布或消费已确定失败，需要人工检查。 */
     public static final int STATUS_FAILED = 3;
+    /** 快速发布补偿耗尽，但仍无法确定消息是否已到达 RabbitMQ。 */
+    public static final int STATUS_PUBLISH_UNKNOWN = 4;
 
 }
