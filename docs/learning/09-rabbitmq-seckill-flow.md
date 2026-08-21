@@ -567,7 +567,7 @@ export SECKILL_RABBIT_CONSUMER_ENABLED=true
 
 - 真实 RabbitMQ 故障注入（交换机不存在、routing key 错误、Confirm 丢失、DLX 目标不可用等规格 18.4 节场景）尚未执行。
 - 跨存储崩溃窗口（Lua 成功后进程终止、回滚 Lua 后进程终止等规格 18.5 节场景）尚未真实演练，仅单元测试覆盖逻辑。
-- 上线迁移（规格 17.1 节：旧 FAILED 事件转 MANUAL_REVIEW、Redis 用户集合无订单成员生成失败记录）需要人工按顺序执行，未授权不得在线操作。
+- 上线迁移（规格 17.1 节）步骤 1-2 已于 2026-08-21 获授权在远程环境执行：事件表已备份（`tb_seckill_order_event_bak_20260821`）、两个新迁移已应用并验证表结构；事件表当前为空，无存量 FAILED 事件需转 MANUAL_REVIEW。步骤 3-8（存量核对、Redis 用户集合补录、兼容部署、小流量验证）待真实流量上线前逐步执行。
 - 失败处置 Service 没有 Controller：项目没有 RBAC，重放/回滚/关闭接口禁止在无管理员授权模型下暴露公网。
 - 消费者默认关闭（`SECKILL_RABBIT_CONSUMER_ENABLED=false`），真实连通性验收后才能启用。
 - 部署可靠性前提（Redis 持久化策略、RabbitMQ 集群与 quorum queue、心跳配置等规格 19.1 节）未逐项确认。

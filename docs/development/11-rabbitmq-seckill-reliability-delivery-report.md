@@ -149,7 +149,7 @@ mvn clean test                                       # 185 tests, 185 passed
 | Java 8 测试源码编译 | PASS |
 | 单元测试（最终代码复验） | 185 执行 / 185 通过 / 0 失败 |
 | 测试环境隔离 | test profile 禁用全部秒杀定时任务，测试不再触碰远程 MySQL/Redis |
-| 迁移 SQL | 静态检查通过；未在线执行（未获授权） |
+| 迁移 SQL | 静态检查通过；已于 2026-08-21 获授权在远程环境（`dish_review` @ 115.29.220.133，MySQL 8.0.46）在线执行并验证 |
 
 > 说明：第一轮验收时 `SecurityFixTests.testPathTraversalDetection` 因 Windows `..\` 分隔符在 macOS 不被识别而失败；本轮已在 `UploadController` 中统一归一化反斜杠后修复，现为 10/10 通过。
 
@@ -158,7 +158,7 @@ mvn clean test                                       # 185 tests, 185 passed
 1. **真实 RabbitMQ 故障注入未执行**（规格 18.4）：交换机不存在、routing key 错误、Confirm 丢失、DLX 目标不可用、失败记录库不可用时的 Recoverer 重入等场景。
 2. **跨存储崩溃窗口未真实演练**（规格 18.5）：Lua 成功后进程终止、回滚 Lua 后进程终止等；当前仅单元测试覆盖逻辑分支。
 3. **并发压测未执行**：多实例 CAS 竞争、重复投递下的唯一索引拦截、消费吞吐。
-4. **上线迁移需人工执行**（规格 17.1）：备份事件表 → 执行两个新迁移 → 暂停入口 → 旧 FAILED 转 MANUAL_REVIEW → Redis 用户集合无订单成员生成失败记录 → 兼容部署 → 小流量验证。未经授权不在线执行。
+4. **上线迁移已执行（规格 17.1 步骤 1-2，2026-08-21）**：已按顺序完成备份事件表（`tb_seckill_order_event_bak_20260821`）→ 执行两个新迁移 → 验证表结构（9 个新列、组合索引 `idx_seckill_order_event_task`、三张新表 `tb_seckill_publish_attempt` / `tb_seckill_failure_case` / `tb_seckill_failure_audit` 全部就位）。事件表当前 0 行，无存量 FAILED 事件需转 MANUAL_REVIEW，步骤 3-8（暂停入口、存量核对、Redis 用户集合补录、兼容部署、小流量验证）随真实流量上线前逐步执行。
 5. **失败处置无 Controller**：项目没有 RBAC，重放/回滚/关闭接口禁止暴露公网；Service 层已就绪并通过测试。
 6. **部署可靠性前提未逐项确认**（规格 19.1）：Redis 持久化策略、RabbitMQ 集群/quorum queue、心跳配置、磁盘告警。
 7. **消费者默认关闭**：`SECKILL_RABBIT_CONSUMER_ENABLED=false`，需真实连通性验收后启用。
@@ -166,11 +166,16 @@ mvn clean test                                       # 185 tests, 185 passed
 ## 6. 需要人工执行的 SQL 与环境配置
 
 ```bash
-# 1. 执行迁移（目标环境检查后）
+# 1. 执行迁移 —— ✅ 已于 2026-08-21 在远程环境（115.29.220.133/dish_review）执行并验证：
+#    - 迁移前已备份：tb_seckill_order_event → tb_seckill_order_event_bak_20260821（0 行）
+#    - 事件表新增 9 列 + 组合索引 idx_seckill_order_event_task 已确认
+#    - 三张新表 tb_seckill_publish_attempt / tb_seckill_failure_case / tb_seckill_failure_audit 已确认
+#    其他环境首次部署仍需执行：
 mysql -u root -p dish_review < src/main/resources/db/migration/20260821_seckill_reliability_upgrade.sql
 mysql -u root -p dish_review < src/main/resources/db/migration/20260822_add_seckill_failure_audit.sql
 
 # 2. 上线前按规格 17.1 节顺序处理存量数据（旧 FAILED → MANUAL_REVIEW 等）
+#    —— 远程环境事件表为空，当前无存量数据需处理；产生流量后若有存量 FAILED 事件再按顺序执行
 
 # 3. 启用消费者（真实连通性验收后）
 export SECKILL_RABBIT_CONSUMER_ENABLED=true
