@@ -2,10 +2,15 @@ package com.dish.review;
 
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HtmlUtil;
+import com.dish.review.controller.UploadController;
 import com.dish.review.utils.PasswordEncoder;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -62,33 +67,91 @@ public class SecurityFixTests {
     // ==================== Fix 4: 路径穿越防护 ====================
 
     /**
-     * 测试路径穿越攻击检测
-     * 验证包含 ../ 的文件名会被正确拦截
+     * 测试路径穿越攻击检测（直接验证 UploadController 真实校验逻辑）
+     *
+     * 覆盖矩阵：正常文件、子目录文件允许；
+     * ../ 穿越、..\ 穿越、嵌套穿越、公共前缀目录、绝对路径、目录本身均拒绝。
+     * Path.startsWith 是路径组件级比较，
+     * 字符串公共前缀漏洞（/upload 与 /upload_backup）不会误放行。
      */
     @Test
-    void testPathTraversalDetection() {
-        String uploadDir = "D:\\develop\\nginx-1.18.0\\html\\dishreview\\imgs";
+    void testPathTraversalDetection(@TempDir Path uploadDir) {
+        Path uploadPath = uploadDir.toAbsolutePath().normalize();
 
         // 正常文件路径
-        assertTrue(isPathSafe(uploadDir, "blogs/1/2/photo.jpg"), "正常文件路径应通过校验");
+        assertNotNull(UploadController.resolveSafeTarget(uploadPath, "normal.jpg"), "正常文件路径应通过校验");
+        assertNotNull(UploadController.resolveSafeTarget(uploadPath, "sub/a.jpg"), "子目录文件应通过校验");
+        assertNotNull(UploadController.resolveSafeTarget(uploadPath, "blogs/1/2/photo.jpg"), "多级子目录文件应通过校验");
 
         // 路径穿越攻击
-        assertFalse(isPathSafe(uploadDir, "../../etc/passwd"), "路径穿越应被拦截");
-        assertFalse(isPathSafe(uploadDir, "..\\..\\windows\\system32"), "Windows 路径穿越应被拦截");
-        assertFalse(isPathSafe(uploadDir, "blogs/../../../etc/shadow"), "嵌套路径穿越应被拦截");
+        assertNull(UploadController.resolveSafeTarget(uploadPath, "../../etc/passwd"), "路径穿越应被拦截");
+        assertNull(UploadController.resolveSafeTarget(uploadPath, "..\\..\\windows\\system32"), "Windows 路径穿越应被拦截");
+        assertNull(UploadController.resolveSafeTarget(uploadPath, "blogs/../../../etc/shadow"), "嵌套路径穿越应被拦截");
+
+        // 公共前缀目录：字符串 startsWith 会误放行，Path 组件级比较必须拦截
+        assertNull(UploadController.resolveSafeTarget(uploadPath, "../upload_backup/a.jpg"), "公共前缀目录穿越应被拦截");
+        assertNull(UploadController.resolveSafeTarget(uploadPath, "..\\upload_backup\\a.jpg"), "Windows 公共前缀穿越应被拦截");
+
+        // 绝对路径注入：resolve 返回绝对路径本身，不在上传目录内
+        assertNull(UploadController.resolveSafeTarget(uploadPath, "/etc/passwd"), "绝对路径注入应被拦截");
+
+        // 目录本身：resolve 结果等于上传目录
+        assertNull(UploadController.resolveSafeTarget(uploadPath, ""), "空文件名应被拦截");
+        assertNull(UploadController.resolveSafeTarget(uploadPath, "."), "目录本身应被拦截");
     }
 
     /**
-     * 模拟 UploadController 的路径穿越防护逻辑
-     * 通过比较 canonical path 判断目标文件是否在上传目录内
+     * 测试符号链接逃逸防护
+     *
+     * 上传目录内的符号链接指向目录外时，词法校验（normalize + startsWith）
+     * 会通过，必须通过 toRealPath 真实路径核验拦截。
      */
-    private boolean isPathSafe(String uploadDir, String filename) {
+    @Test
+    void testSymlinkEscapeDetection(@TempDir Path uploadDir) throws Exception {
+        // JUnit 多个 @TempDir 参数共享同一目录，外部目录必须手动创建
+        Path outsideDir = Files.createTempDirectory("outside-upload");
+
         try {
-            File baseDir = new File(uploadDir).getCanonicalFile();
-            File targetFile = new File(baseDir, filename).getCanonicalFile();
-            return targetFile.getPath().startsWith(baseDir.getPath());
-        } catch (Exception e) {
-            return false;
+            // 外部目录放置真实文件，上传目录内创建指向它的符号链接
+            Files.write(outsideDir.resolve("evil.jpg"), new byte[]{1});
+
+            Path symlink = uploadDir.resolve("linked");
+
+            try {
+                Files.createSymbolicLink(symlink, outsideDir);
+            } catch (Exception exception) {
+                // 文件系统不支持符号链接时跳过本用例（如部分 CI 容器）
+                org.junit.jupiter.api.Assumptions.assumeTrue(
+                        false,
+                        "当前环境不支持创建符号链接：" + exception.getMessage()
+                );
+                return;
+            }
+
+            Path uploadPath = uploadDir.toAbsolutePath().normalize();
+            Path target = UploadController.resolveSafeTarget(
+                    uploadPath, "linked/evil.jpg");
+
+            // 词法校验通过：路径看起来在上传目录内
+            assertNotNull(target, "词法校验应通过（符号链接在词法上不可见）");
+
+            // 真实路径核验必须拦截：解析符号链接后已逃逸出上传目录
+            assertFalse(
+                    UploadController.isRealPathWithinUpload(uploadPath, target),
+                    "符号链接逃逸应被 toRealPath 核验拦截"
+            );
+
+            // 对照：上传目录内的真实文件不会被误拦
+            Path realFile = uploadDir.resolve("legit.jpg");
+            Files.write(realFile, new byte[]{1});
+
+            Path legitTarget = UploadController.resolveSafeTarget(
+                    uploadPath, "legit.jpg");
+
+            assertTrue(UploadController.isRealPathWithinUpload(
+                    uploadPath, legitTarget), "正常文件不应被真实路径核验误拦");
+        } finally {
+            cn.hutool.core.io.FileUtil.del(outsideDir.toFile());
         }
     }
 

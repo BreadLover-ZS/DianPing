@@ -16,6 +16,7 @@ public final class RabbitMqConstants {
     public static final String SECKILL_ORDER_ID_HEADER = "orderId";
     public static final String SECKILL_ORDER_USER_ID_HEADER = "userId";
     public static final String SECKILL_ORDER_VOUCHER_ID_HEADER = "voucherId";
+    public static final String SECKILL_ORDER_ATTEMPT_ID_HEADER = "attemptId";
 
     public static final String SECKILL_ORDER_EXCHANGE = "dianping.seckill.direct";
     public static final String SECKILL_ORDER_QUEUE = "dianping.seckill.order.queue";

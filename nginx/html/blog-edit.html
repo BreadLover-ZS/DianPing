@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
@@ -129,7 +129,11 @@
           .catch(this.$message.error);
       },
       deletePic(i) {
-        axios.get("/upload/blog/delete?name=" + this.fileList[i])
+        // 后端只保留 DELETE /upload/blog/delete；
+        // name 期望上传目录内相对路径（如 blogs/1/2/x.jpg），
+        // fileList 存的是带 /imgs 前缀的展示 URL，需先剥离前缀
+        let name = this.fileList[i].replace(/^\/imgs\/?/, "");
+        axios.delete("/upload/blog/delete", {params: {name: name}})
           .then(() => this.fileList.splice(i, 1))
           .catch(this.$message.error)
       },

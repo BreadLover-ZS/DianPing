@@ -70,10 +70,12 @@ Feed：
 作者发布笔记 → 查询粉丝 → 写入粉丝 Feed ZSet
 用户查看 Feed → 时间戳滚动分页 → 查询笔记详情
 
-秒杀：
-校验时间 → Redis Lua 预扣 → 写 PENDING 事件 → 发布 RabbitMQ
-→ Confirm/Return 更新事件状态 → 消费者事务内条件扣库存
-→ 保存订单并标记 CONSUMED → Spring 自动 ACK
+秒杀（可靠性闭环版）：
+校验时间 → 生成 eventId/orderId（Lua 前）→ Redis Lua 原子预扣 + 写预留账本
+→ 尽力写 PENDING 事件后返回受理 → Outbox 任务 CAS 抢占并发布 RabbitMQ
+→ Confirm/Return 按 attemptId 落发布尝试证据 → 失败决策服务统一裁决
+→ 消费者事务内 CAS 锁定状态、条件扣库存、写订单、标记 CONSUMED → 自动 ACK
+→ 对账任务双向核对 Redis 预留与 MySQL 事件
 ```
 
 ### 1.4 Redis 使用总表
@@ -108,6 +110,9 @@ User ──< VoucherOrder >── Voucher
 | `tb_seckill_voucher` | `voucher_id` 主键 | 一张券只对应一条秒杀库存记录。 |
 | `tb_shop` | `type_id` 索引 | 按商铺分类查询具备基础索引。 |
 | `tb_voucher_order` | 订单主键；`(user_id, voucher_id)` 联合唯一索引 | Redis 或消息链路失效时，数据库仍可最终拒绝重复订单。 |
+| `tb_seckill_order_event` | `(status, next_retry_time, lease_until)` 任务扫描索引；`row_version` CAS；租约列 | 事件表即 Outbox；状态机 10 态约束迁移，迟到回调不能覆盖终态。 |
+| `tb_seckill_publish_attempt` | `uk(event_id, attempt_no)` | 每次实际发送一行证据，Confirm/Return/异常分开记录。 |
+| `tb_seckill_failure_case` | `idempotency_key` 唯一索引 | DLQ、回滚异常、对账冲突的持久化事实，防重复落库。 |
 
 初始化 SQL 已包含关注索引和订单唯一索引，`db/migration/` 也保留了对应增量脚本。项目没有自动迁移框架，执行前必须检查目标环境，后续可引入 Flyway/Liquibase。
 
@@ -143,7 +148,7 @@ MySQL 是用户、商铺、笔记和订单等数据的持久化事实源，提�
 
 **参考答案：**
 
-我会选择秒杀并发控制。当前入口使用 Redis Lua 原子预扣，事件表记录发布状态，RabbitMQ 消费者用 MySQL `stock > 0` 条件更新和事务落库，数据库联合唯一索引负责最终防重。还需要通过真实 RabbitMQ、重复投递和并发压测验证这条链路。
+我会选择秒杀可靠性闭环。入口用 Redis Lua 原子预扣并写六 Key 预留账本（含 orderId 反向索引，全部同 `{voucherId}` 槽）；事件表作为 Outbox 是唯一生产者入口（CAS + 租约）；Confirm/Return 按 attemptId 落发布尝试证据，统一失败决策服务裁决是否回滚；消费端异常分三类处理，重试耗尽先落失败记录再进 DLQ；持久化回滚任务按 eventId 执行回滚 Lua；定时任务双层对账（7 天快速扫描 + 每小时全量分页兜底）。真实 RabbitMQ 故障演练和并发压测仍未完成，这是必须主动说明的边界。
 
 ### 6. 如何诚实描述这是一个教程项目？
 
@@ -334,7 +339,7 @@ Feed 会持续新增数据，普通页码分页可能因数据插入发生重复
 
 **参考答案：**
 
-Controller 调用 `seckillVoucher`，校验登录和活动时间后执行 Lua 预扣。预扣成功便生成 `orderId/eventId`，写入 `tb_seckill_order_event(PENDING)` 并发布 RabbitMQ；消费者事务内检查一人一单、条件扣 MySQL 库存、保存订单，最后标记事件 `CONSUMED`。
+Controller 调用 `seckillVoucher`，校验登录和活动时间后**先生成 `orderId/eventId`**，再执行 Lua 原子预扣（同时写库存、用户集合和预留账本六个 Key），尽力写入 `tb_seckill_order_event(PENDING)` 后立即返回受理结果。Outbox 发布任务扫描到期事件，CAS + 租约抢占后同事务记录发布尝试并发送 RabbitMQ；消费者事务内 CAS 锁定事件状态、检查一人一单、条件扣 MySQL 库存、保存订单并标记 `CONSUMED`；对账任务最终清理 Redis 预留账本（保留一人一单集合）。
 
 ### 34. 项目用了乐观锁还是悲观锁？
 
@@ -400,7 +405,7 @@ Spring 事务通常通过 AOP 代理实现，同一个对象内部用 `this` 调
 
 **参考答案：**
 
-当前先由 Lua 在 Redis 用户集合中原子拦截重复预扣，再由消费者查询订单和数据库 `(user_id, voucher_id)` 联合唯一索引兜底；重复键会被识别为幂等成功并标记事件 `CONSUMED`。
+四层防线：Lua 在 Redis 用户集合中原子拦截重复预留；消费事务先 CAS 检查事件状态（CONSUMED 直接幂等返回）；消费者查询已有订单；数据库 `(user_id, voucher_id)` 联合唯一索引最终兜底，重复键只有在确认订单确实存在后才按幂等成功处理。
 
 ### 45. 为什么有 Redis 锁还需要数据库唯一索引？
 
@@ -424,11 +429,11 @@ Redis 锁可能因过期、故障、实现缺陷或运维操作失效。数据�
 
 **参考答案：**
 
-当前仍需补充真实环境验收、事件表对账、死信人工处理工具、监控告警和 Redis 预扣与数据库订单之间的崩溃恢复演练。消费者和入口接线已经完成，不能再按“尚无消费者”描述。
+代码层面的可靠性闭环已完成（预留账本、Outbox、失败决策、持久化回滚、双向对账、DLQ 失败记录与处置 Service、订单状态查询），但仍需：真实 RabbitMQ 故障注入演练（规格 18.4 节）、跨存储崩溃窗口演练（18.5 节）、并发压测、上线迁移人工步骤（17.1 节）、RBAC 完成后才能开放失败处置 Controller。消费者默认关闭，需真实连通性验收后启用。
 
-### 6.1 RabbitMQ 秒杀改造面试追问（正在二次开发）
+### 6.1 RabbitMQ 秒杀改造面试追问（可靠性闭环已完成）
 
-> **事实边界：** 已完成：交换机/队列/死信、JSON 持久化消息、Confirm/Return、事件状态表、Lua 预扣/回滚、消费者事务幂等、发布快速补偿、PUBLISH_UNKNOWN 低频重发和监听重试耗尽入 DLQ。未完成：远端 RabbitMQ 可达性、真实并发/故障验收、死信人工处理和完整对账。
+> **事实边界：** 已完成（代码 + 单元测试）：交换机/队列/死信拓扑、JSON 持久化消息、六 Key 预留账本 Lua（含 orderId 反向索引，同 `{voucherId}` 槽）、事件表 Outbox（CAS + 租约）、发布尝试证据表、统一失败决策服务、异常三分类、监听前 ErrorHandler、DLQ 消费者、持久化回滚任务、双层对账任务（7 天快速扫描 + 每小时全量分页兜底）、库存安全初始化与缺失扫描、失败记录 + 审计 + 处置 Service、订单状态查询接口（新旧两版）。未完成：远端 RabbitMQ 可达性验收、真实并发/故障注入演练、跨存储崩溃窗口演练、上线迁移人工步骤、RBAC 与失败处置 Controller。
 
 #### R1. 秒杀订单为什么选择 DirectExchange，而不是 FanoutExchange 或 TopicExchange？
 
@@ -497,6 +502,60 @@ Publisher Confirm 证明 Broker 是否接收了发布请求；消息持久化决
 **参考答案：**
 
 如果生产者向一个不存在的交换机发布消息，消息没有到达目标交换机，应通过 Confirm 的 NACK、Channel 异常或发布异常发现，而不是依赖 ReturnCallback。可以记成：exchange 名称决定能否到达交换机，routing key 决定交换机能否找到队列。
+
+#### R10. 什么是 Outbox 模式？项目里怎么实现的？
+
+**参考答案：**
+
+业务操作和消息发送之间存在崩溃窗口：消息发出前进程崩溃，订单事件就丢了。Outbox 把“要发送的消息”先持久化到数据库，再由独立任务扫描发送。项目中事件表就是 Outbox：请求线程只写 PENDING 事件，`SeckillOrderPublishRetryTask` 是唯一发布入口——CAS + 租约抢占到期事件，同一事务内创建发布尝试记录并递增 retry_count，事务提交后调用一次 `convertAndSend`。发布前崩溃则事件仍在数据库，到期会被重新扫描。同时禁用了 `spring.rabbitmq.template.retry`，避免模板重试和 Outbox 重试相乘导致发送次数无法解释。
+
+#### R11. Redis 预留账本是什么？为什么需要？
+
+**参考答案：**
+
+六个同 hash tag 的 Key：库存 String、用户 Set、事件预留详情 Hash（eventId -> orderId|userId|createdAt|version）、用户事件映射 Hash（userId -> eventId）、待对账 ZSet（eventId -> reservedAt）、orderId 反向索引 Hash（orderId -> eventId，供订单状态查询直达）。它关闭“Lua 预扣成功后、事件落库前崩溃”的窗口：旧实现里这个窗口只留下库存数字变化，没有可发现的持久化记录；有了账本，对账任务可以按待对账 ZSet 幂等补建 PENDING 事件或核对订单后收敛状态。同 hash tag 保证六 Key 在 Redis Cluster 同一槽，Lua 才能原子操作（反向索引必须也是券维度，否则跨槽报 CROSSSLOT）。
+
+#### R12. 回滚为什么必须按 eventId 校验，不能只按 userId？
+
+**参考答案：**
+
+同一用户可能先预留事件 A、回滚后再预留事件 B。只按用户回滚时，事件 A 的迟到回滚会误删事件 B 的预留并错误恢复库存。回滚 Lua 检查用户事件映射（userId -> eventId）：映射不存在返回 0（已处理，幂等）；映射指向其他事件返回 -2（冲突，禁止动库存）；只有映射匹配才删除账本、SREM 用户，且只有确实移除了用户才 INCR 库存。
+
+#### R13. 失败决策服务怎么避免误回滚？
+
+**参考答案：**
+
+Confirm NACK、Return、发送异常只按 attemptId 落发布尝试证据，是否回滚统一由 `SeckillOrderFailureDecisionService` 按固定顺序裁决：先查 MySQL 订单，订单存在则收敛 CONSUMED 禁止回滚；存在“ACK 且无 Return”的可路由尝试或任何未知尝试时禁止回滚（消息可能已到 Broker）；只有所有尝试都明确 NACK 或 Return 且没有消费证据才进入 ROLLBACK_PENDING。核心原则是不用“最后一次发送失败”推断“整个事件从未到达 RabbitMQ”。决策拆成纯函数 + 执行层，纯函数不碰 Redis/RabbitMQ，可完整单元测试。
+
+#### R14. 消费者怎么处理和回滚任务的并发竞争？
+
+**参考答案：**
+
+状态机保证回滚和消费不会同时成功。回滚决定后事件是 ROLLBACK_PENDING：消费者到达时先 CAS 取消回滚（ROLLBACK_PENDING → PENDING），成功才继续创建订单；失败说明回滚任务已抢占，等待。回滚任务执行时事件是 ROLLBACK_EXECUTING：消费者遇到该状态抛可重试异常等回滚收敛；这处理了“回滚 Lua 已恢复库存、数据库状态未更新”的窗口，防止库存已恢复又同时创建订单。
+
+#### R15. 消费失败为什么要先落失败记录再进 DLQ？顺序有什么讲究？
+
+**参考答案：**
+
+经典队列的死信转发不是可靠持久化边界——DLX 目标不可用或路由错误时死信可能丢失，所以 MySQL 失败记录才是消费失败的持久化事实，DLQ 只是运维副本。顺序：MessageRecoverer 先用独立 `@Transactional` 方法提交失败记录（幂等键防重），再把事件标记 DLQ，事务提交后才拒绝消息让 Broker 转发死信。失败记录落库失败时抛 `ImmediateRequeueAmqpException` 强制重新入队，禁止 ACK 或丢弃。失败记录和拒绝异常不能放同一事务，否则拒绝异常会把刚写入的记录一起回滚。
+
+#### R16. 反序列化失败发生在 Listener 之前，怎么持久化？
+
+**参考答案：**
+
+`@RabbitListener` 方法执行前的消息转换异常无法被业务代码捕获，MessageRecoverer 也不一定被调用。项目配置了容器级 `SeckillRabbitListenerErrorHandler`：从失败的原始 AMQP Message 提取 messageId、Header 和受限长度的消息摘要，先幂等写入失败记录，再拒绝进 DLQ；持久化失败强制重新入队。禁止把无法转换的原始消息无限完整写入日志或数据库。
+
+#### R17. 订单状态查询为什么区分 NOT_FOUND 和 UNAVAILABLE？
+
+**参考答案：**
+
+MySQL 或 Redis 查询失败时如果返回 NOT_FOUND，用户会以为订单不存在而重新下单——技术故障被伪装成业务结果。所以裁决顺序是 MySQL 订单 → 事件状态 → Redis 预留；所有数据源都查询成功且确实无记录才返回 NOT_FOUND；任一依赖查询失败返回 UNAVAILABLE 提示稍后再查。同时只能查自己的订单，他人订单按 NOT_FOUND 处理不泄露存在性。
+
+#### R18. 对账任务为什么分批？库存为什么不能直接 Redis = MySQL？
+
+**参考答案：**
+
+分批防止全量 SCAN 阻塞 Redis。库存直接覆盖会把仍在途的有效预留再次卖出造成超卖，安全公式是“Redis 可售库存 = MySQL 剩余库存 − 尚未创建订单但仍有效的 Redis 预留数”；用户集合由“MySQL 已下单用户 + 有效预留用户”重建。对账是双向的：Redis 预留 → MySQL（孤儿预留补建事件或收敛）和 MySQL 事件 → Redis（CONSUMED 清理预留、ROLLBACK_EXECUTING 超时收敛、PUBLISH_UNKNOWN 超时转人工）。
 
 ---
 
@@ -568,7 +627,7 @@ Redis 和数据库可能不一致，Redis 锁也可能失效。订单最终写�
 
 当前阶段可以写成：
 
-> 为秒杀链路实现 Redis Lua 预扣、RabbitMQ 消息拓扑与可靠生产者/消费者，并使用事件状态、有限补偿和数据库联合唯一索引兜底；真实 RabbitMQ 和并发验收仍待完成。
+> 为秒杀链路完成可靠性闭环改造：Redis Lua 原子预扣 + 六 Key 同槽预留账本（含 orderId 反向索引 Hash）、MySQL 事件表 Outbox（CAS + 租约抢占）、发布尝试证据表与统一失败决策服务、消费异常三分类（可重试/永久/一致性）、先落失败记录再进 DLQ 的死信闭环、持久化事件级回滚任务、Redis/MySQL 双向对账（7 天回看快速扫描 + 每小时全量分页兜底，异常预留先写人工集合再移除待对账入口）与库存安全初始化、六态订单状态查询；185 个单元测试覆盖状态机、决策与任务逻辑。真实 RabbitMQ 故障演练和并发压测仍待完成。
 
 ### 9.2 禁止夸大的说法
 
@@ -598,7 +657,11 @@ Redis 和数据库可能不一致，Redis 锁也可能失效。订单最终写�
 - [x] 编写并接入 Redis Lua，原子判断库存和一人一单。
 - [x] 完成 RabbitMQ 消费者并切换秒杀入口。
 - [x] 增加消费幂等、重试、死信、发布补偿与事件状态记录。
-- [ ] 增加死信人工处理工具、事件对账和 Redis 预扣崩溃恢复。
+- [x] 增加死信人工处理 Service（重放/回滚/关闭 + 审计；Controller 待 RBAC）、事件对账和 Redis 预扣崩溃恢复（预留账本）。
+- [x] 完成 Outbox 改造：请求线程不再直接发布，统一由发布任务 CAS + 租约抢占发送。
+- [x] 增加失败决策服务、发布尝试证据表、异常三分类和监听前 ErrorHandler。
+- [ ] 真实 RabbitMQ 故障注入演练（规格 18.4 节）和跨存储崩溃窗口演练（18.5 节）。
+- [ ] 执行上线迁移人工步骤（规格 17.1 节）。
 - [ ] 把缓存删除移动到事务提交后，评估延迟双删或消息同步。
 - [ ] 修正空值缓存 TTL，区分正常数据和空值过期时间。
 - [ ] 解决热门笔记作者查询的 N+1 问题。
@@ -627,15 +690,19 @@ Redis 和数据库可能不一致，Redis 锁也可能失效。订单最终写�
 | 通用缓存工具 | [`CacheClient.java`](../../src/main/java/com/dish/review/utils/CacheClient.java) |
 | 点赞和 Feed | [`BlogServiceImpl.java`](../../src/main/java/com/dish/review/service/impl/BlogServiceImpl.java) |
 | 关注和共同关注 | [`FollowServiceImpl.java`](../../src/main/java/com/dish/review/service/impl/FollowServiceImpl.java) |
-| 秒杀下单 | [`VoucherOrderServiceImpl.java`](../../src/main/java/com/dish/review/service/impl/VoucherOrderServiceImpl.java) |
-| Lua 预扣与回滚 | [`SeckillVoucherLuaExecutor.java`](../../src/main/java/com/dish/review/service/SeckillVoucherLuaExecutor.java)、[`seckill.lua`](../../src/main/resources/seckill.lua)、[`seckill_rollback.lua`](../../src/main/resources/seckill_rollback.lua) |
-| RabbitMQ 拓扑与生产者 | [`RabbitMqConfig.java`](../../src/main/java/com/dish/review/config/RabbitMqConfig.java)、[`SeckillOrderPublisher.java`](../../src/main/java/com/dish/review/mq/SeckillOrderPublisher.java) |
-| RabbitMQ 回调与补偿 | [`RabbitMqPublisherCallback.java`](../../src/main/java/com/dish/review/mq/RabbitMqPublisherCallback.java)、[`SeckillOrderPublishRetryTask.java`](../../src/main/java/com/dish/review/mq/SeckillOrderPublishRetryTask.java) |
-| RabbitMQ 消费与幂等 | [`SeckillOrderConsumer.java`](../../src/main/java/com/dish/review/mq/SeckillOrderConsumer.java)、[`VoucherOrderHandler.java`](../../src/main/java/com/dish/review/service/VoucherOrderHandler.java) |
-| 事件状态 | [`SeckillOrderEventService.java`](../../src/main/java/com/dish/review/service/SeckillOrderEventService.java)、[`SeckillOrderEvent.java`](../../src/main/java/com/dish/review/entity/SeckillOrderEvent.java) |
+| 秒杀下单与状态查询 | [`VoucherOrderServiceImpl.java`](../../src/main/java/com/dish/review/service/impl/VoucherOrderServiceImpl.java) |
+| Lua 预扣/回滚/完成/初始化 | [`SeckillVoucherLuaExecutor.java`](../../src/main/java/com/dish/review/service/SeckillVoucherLuaExecutor.java)、[`seckill.lua`](../../src/main/resources/seckill.lua)、[`seckill_rollback.lua`](../../src/main/resources/seckill_rollback.lua)、[`seckill_reservation_complete.lua`](../../src/main/resources/seckill_reservation_complete.lua)、[`seckill_stock_init.lua`](../../src/main/resources/seckill_stock_init.lua) |
+| RabbitMQ 拓扑与 Outbox | [`RabbitMqConfig.java`](../../src/main/java/com/dish/review/config/RabbitMqConfig.java)、[`SeckillOrderPublishRetryTask.java`](../../src/main/java/com/dish/review/mq/SeckillOrderPublishRetryTask.java)、[`SeckillOrderPublisher.java`](../../src/main/java/com/dish/review/mq/SeckillOrderPublisher.java)、[`SeckillPublishRetryPolicy.java`](../../src/main/java/com/dish/review/service/SeckillPublishRetryPolicy.java) |
+| Confirm/Return 与超时 | [`SeckillPublishConfirmHandler.java`](../../src/main/java/com/dish/review/mq/SeckillPublishConfirmHandler.java)、[`RabbitMqPublisherCallback.java`](../../src/main/java/com/dish/review/mq/RabbitMqPublisherCallback.java)、[`SeckillPublishConfirmTimeoutTask.java`](../../src/main/java/com/dish/review/mq/SeckillPublishConfirmTimeoutTask.java) |
+| 失败决策 | [`SeckillOrderFailureDecisionService.java`](../../src/main/java/com/dish/review/service/SeckillOrderFailureDecisionService.java) |
+| 事件状态机与租约 | [`SeckillOrderEventStateMachine.java`](../../src/main/java/com/dish/review/service/SeckillOrderEventStateMachine.java)、[`SeckillOrderEventService.java`](../../src/main/java/com/dish/review/service/SeckillOrderEventService.java)、[`SeckillOrderEvent.java`](../../src/main/java/com/dish/review/entity/SeckillOrderEvent.java) |
+| RabbitMQ 消费与幂等 | [`SeckillOrderConsumer.java`](../../src/main/java/com/dish/review/mq/SeckillOrderConsumer.java)、[`SeckillRabbitListenerErrorHandler.java`](../../src/main/java/com/dish/review/mq/SeckillRabbitListenerErrorHandler.java)、[`VoucherOrderHandler.java`](../../src/main/java/com/dish/review/service/VoucherOrderHandler.java) |
+| 持久化回滚 | [`SeckillReservationRollbackTask.java`](../../src/main/java/com/dish/review/mq/SeckillReservationRollbackTask.java)、[`SeckillRollbackRetryPolicy.java`](../../src/main/java/com/dish/review/service/SeckillRollbackRetryPolicy.java) |
+| 双向对账与库存扫描 | [`SeckillOrderReconciliationTask.java`](../../src/main/java/com/dish/review/mq/SeckillOrderReconciliationTask.java)、[`SeckillStockInitScanTask.java`](../../src/main/java/com/dish/review/mq/SeckillStockInitScanTask.java) |
+| DLQ 闭环与失败处置 | [`SeckillOrderDeadLetterConsumer.java`](../../src/main/java/com/dish/review/mq/SeckillOrderDeadLetterConsumer.java)、[`SeckillFailureEvidence.java`](../../src/main/java/com/dish/review/mq/SeckillFailureEvidence.java)、[`SeckillFailureCaseService.java`](../../src/main/java/com/dish/review/service/SeckillFailureCaseService.java)、[`SeckillOrderFailureAdminService.java`](../../src/main/java/com/dish/review/service/SeckillOrderFailureAdminService.java) |
 | Redis 分布式锁 | [`SimpleRedisLock.java`](../../src/main/java/com/dish/review/utils/SimpleRedisLock.java) |
 | 全局 ID | [`RedisIdWorker.java`](../../src/main/java/com/dish/review/utils/RedisIdWorker.java) |
-| 数据库约束 | [`dish_review.sql`](../../src/main/resources/db/dish_review.sql) |
+| 数据库约束 | [`dish_review.sql`](../../src/main/resources/db/dish_review.sql)、[`db/migration`](../../src/main/resources/db/migration) |
 | 测试现状 | [`src/test/java`](../../src/test/java) |
 
 ---
@@ -645,9 +712,9 @@ Redis 和数据库可能不一致，Redis 锁也可能失效。订单最终写�
 1. **认证主线**：`MvcConfig` → 两个拦截器 → `UserHolder` → `UserServiceImpl`。独立画出 Token 创建、续期、登出和 ThreadLocal 清理流程。
 2. **商铺主线**：`ShopController` → `ShopServiceImpl` → `CacheClient`。分别请求存在和不存在的商铺，观察普通缓存和空值缓存。
 3. **社交主线**：阅读 `BlogServiceImpl` 和 `FollowServiceImpl`，写清每个 ZSet 的 member、score，以及 Feed 的 `lastId + offset`。
-4. **秒杀主线**：`VoucherOrderServiceImpl` → Lua 预扣 → `SeckillOrderEventService` → `SeckillOrderPublisher` → `SeckillOrderConsumer` → `VoucherOrderHandler`。分别验证 Redis 预扣、事件状态、数据库订单和重复消息。
+4. **秒杀主线**：`VoucherOrderServiceImpl`（ID 前置 + Lua 预留）→ `SeckillOrderEventService`（PENDING + CAS/租约）→ `SeckillOrderPublishRetryTask`（Outbox）→ `SeckillPublishConfirmHandler`（尝试证据）→ `SeckillOrderFailureDecisionService`（统一裁决）→ `SeckillOrderConsumer` → `VoucherOrderHandler`（事务内 CAS + 落库）→ `SeckillReservationRollbackTask` / `SeckillOrderReconciliationTask`（收敛）。分别验证 Redis 预留账本、事件状态、发布尝试、数据库订单和重复消息。
 5. **表与索引**：对主要查询执行 `EXPLAIN`，观察索引、回表、排序和范围扫描，而不是只背表结构。
-6. **开始二开**：先为 RabbitMQ 改造写验收条件、失败矩阵和数据库迁移，再修改生产者、消费者和测试，最后分别核对 Redis、RabbitMQ 与 MySQL 状态。
+6. **开始二开**：先为 RabbitMQ 改造写验收条件、失败矩阵和数据库迁移，再修改生产者、消费者和测试，最后分别核对 Redis、RabbitMQ 与 MySQL 状态。可靠性闭环改造规格见 [`10-rabbitmq-seckill-reliability-development-spec.md`](../development/10-rabbitmq-seckill-reliability-development-spec.md)，流程文档见 [`09-rabbitmq-seckill-flow.md`](09-rabbitmq-seckill-flow.md)。
 
 ---
 
@@ -659,6 +726,7 @@ Redis 和数据库可能不一致，Redis 锁也可能失效。订单最终写�
 | 2026-08-19 | `aa7392d` + `33a0303` | 合并历史面试指南，补回数据库约束、分类缓存、评论链路、GEO 同步边界、Redis 秒杀事实与实操顺序 | 文档合并；代码能力没有因此发生变化 |
 | 2026-08-19 | `codex/rabbitmq-seckill` | 增加 RabbitMQ 秒杀改造面试追问 | Spring AMQP 依赖和连接配置通过 JDK 8 编译 |
 | 2026-08-20 | `main`（RabbitMQ 秒杀改造） | 接通 Lua 预扣、PENDING 事件、RabbitMQ 生产/消费、Confirm/Return 回滚、有限补偿与 DLQ 状态记录；远端创建事件表 | 主源码和测试源码编译通过、事件表结构核验通过；RabbitMQ 5672 当前拒绝连接，真实并发验收未完成 |
+| 2026-08-21 | 秒杀可靠性闭环改造 | 按规格 10 完成阶段 1-6：预留账本、Outbox、失败决策、异常三分类、DLQ 闭环、持久化回滚、双向对账、库存安全初始化、订单状态查询、失败处置 Service；新增 R10-R18 面试题；三轮验收修复关键状态机和前后端联动；最终调整人工移交 Lua 为“先写目标、后删源入口”，避免运行时错误留下不完整迁移 | 185 个单元测试全部通过；迁移 SQL 静态检查通过；真实 RabbitMQ 故障演练未执行 |
 
 后续更新建议使用以下格式：
 

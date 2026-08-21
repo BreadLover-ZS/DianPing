@@ -36,17 +36,11 @@ spring:
       # 无法路由到队列时，把消息退回生产者
       mandatory: true
 
-      # 处理连接失败、发送异常等同步故障
+      # 【可靠性改造】生产者模板重试必须关闭：
+      # 重试统一由 MySQL Outbox 发布任务控制，
+      # 模板重试与 Outbox 重试叠加会让实际发送次数无法解释
       retry:
-        enabled: true
-
-        # 第一次发送 + 三次重试
-        max-attempts: 4
-
-        # 三次重试间隔约为 1 秒、2 秒、4 秒
-        initial-interval: 1s
-        multiplier: 2
-        max-interval: 4s
+        enabled: false
     listener:
       simple:
         # 监听方法正常返回后由 Spring ACK；抛出异常则不确认
@@ -81,6 +75,38 @@ dish-review:
   seckill:
     rabbit-consumer-enabled: ${SECKILL_RABBIT_CONSUMER_ENABLED:false}
     publish-retry-delay: ${SECKILL_PUBLISH_RETRY_DELAY:1000}
+    # Outbox 发布任务参数
+    outbox:
+      batch-size: ${SECKILL_OUTBOX_BATCH_SIZE:20}
+      lease-seconds: ${SECKILL_OUTBOX_LEASE_SECONDS:60}
+    # 发布确认超时（秒）与超时扫描参数
+    confirm-timeout-seconds: ${SECKILL_CONFIRM_TIMEOUT_SECONDS:30}
+    confirm-timeout-batch-size: ${SECKILL_CONFIRM_TIMEOUT_BATCH_SIZE:100}
+    confirm-timeout-scan-delay: ${SECKILL_CONFIRM_TIMEOUT_SCAN_DELAY:5000}
+    # 持久化回滚任务参数
+    rollback:
+      batch-size: ${SECKILL_ROLLBACK_BATCH_SIZE:20}
+      scan-delay: ${SECKILL_ROLLBACK_SCAN_DELAY:5000}
+    # Redis/MySQL 对账任务参数
+    reconcile:
+      scan-delay: ${SECKILL_RECONCILE_SCAN_DELAY:60000}
+      reservation-threshold-minutes: ${SECKILL_RECONCILE_RESERVATION_THRESHOLD_MINUTES:30}
+      reservation-batch-size: ${SECKILL_RECONCILE_RESERVATION_BATCH_SIZE:50}
+      event-window-minutes: ${SECKILL_RECONCILE_EVENT_WINDOW_MINUTES:60}
+      event-batch-size: ${SECKILL_RECONCILE_EVENT_BATCH_SIZE:100}
+      rollback-stuck-minutes: ${SECKILL_RECONCILE_ROLLBACK_STUCK_MINUTES:10}
+      publish-unknown-max-hours: ${SECKILL_RECONCILE_PUBLISH_UNKNOWN_MAX_HOURS:24}
+      # 快速扫描的券结束时间回看窗口（天）；窗口外历史券由安全兜底扫描覆盖
+      reservation-voucher-lookback-days: ${SECKILL_RECONCILE_RESERVATION_LOOKBACK_DAYS:7}
+      # 安全兜底扫描：每小时游标分页遍历全部 tb_seckill_voucher（最终一致性）
+      safety-scan-cron: ${SECKILL_RECONCILE_SAFETY_SCAN_CRON:0 0 * * * *}
+      safety-scan-page-size: ${SECKILL_RECONCILE_SAFETY_SCAN_PAGE_SIZE:100}
+    # 失败处置 Service 参数（无 RBAC，Controller 禁止开放）
+    failure-admin:
+      max-replay-count: ${SECKILL_FAILURE_MAX_REPLAY_COUNT:3}
+    # 缺失库存扫描与库存一致性指标任务
+    stock-scan:
+      scan-delay: ${SECKILL_STOCK_SCAN_DELAY:300000}
 logging:
   level:
     # 【安全修复】生产环境使用 info 级别，避免 debug 日志泄露敏感信息

@@ -25,7 +25,7 @@
 
 ## 项目简介
 
-DishReview 是一款基于 **Java 8 + Spring Boot 2.3 + MyBatis-Plus + MySQL + Redis + RabbitMQ** 构建的餐饮点评平台。当前实现已将秒杀入口接入 Redis Lua 预扣、事件持久化和 RabbitMQ 异步投递；消费者默认由环境变量控制，真实 RabbitMQ 连接和并发验收仍需单独完成。
+DishReview 是一款基于 **Java 8 + Spring Boot 2.3 + MyBatis-Plus + MySQL + Redis + RabbitMQ** 构建的餐饮点评平台。秒杀链路已完成成体系的可靠性闭环改造：Redis Lua 原子预留账本、MySQL 事件 Outbox、RabbitMQ 至少一次投递、幂等消费、持久化回滚任务、定时对账与 DLQ 失败处置闭环；消费者默认由环境变量控制，真实 RabbitMQ 故障演练和并发验收仍需单独完成。
 
 项目将典型的互联网业务场景与 Redis 高级数据结构深度结合，是学习和实践 **缓存设计、分布式锁、Feed 流、基于 GEO 的 LBS 查询、BitMap 签到、全局唯一 ID 生成** 等技术的完整参考实现。
 
@@ -45,7 +45,7 @@ DishReview 是一款基于 **Java 8 + Spring Boot 2.3 + MyBatis-Plus + MySQL + R
 | Feed 流 | 关注的人发布笔记后推送到粉丝收件箱（ZSet 推模式），滚动分页查询（score + offset） |
 | 评论 | 笔记评论列表、新增评论并同步评论计数 |
 | 优惠券 | 普通券/秒杀券管理，店铺优惠券查询 |
-| 秒杀 | 时间窗校验、Redis Lua 原子预扣、PENDING 事件、RabbitMQ 异步消费、MySQL 条件扣库存与一人一单唯一索引 |
+| 秒杀 | 时间窗校验、Redis Lua 原子预扣 + 预留账本、MySQL 事件 Outbox、RabbitMQ 异步消费、幂等消费、持久化回滚、定时对账、DLQ 失败处置闭环、订单状态查询 |
 | 文件上传 | 博客图片上传（类型白名单 + 5MB 大小限制）、删除（路径穿越防护） |
 
 ---
@@ -61,7 +61,7 @@ DishReview 是一款基于 **Java 8 + Spring Boot 2.3 + MyBatis-Plus + MySQL + R
 | MyBatis-Plus | 3.4.3 | ORM / 分页插件 |
 | MySQL | 5.6+（mysql-connector-java 5.1.47） | 关系型数据库 |
 | Spring Data Redis (Lettuce + commons-pool2) | Spring Boot 内置 | Redis 客户端 |
-| Spring AMQP / RabbitMQ | Spring Boot 内置 / 3.13 | 秒杀订单可靠投递、有限重试与死信 |
+| Spring AMQP / RabbitMQ | Spring Boot 内置 / 3.13 | 秒杀订单 Outbox 至少一次投递、分类重试、死信与失败记录闭环 |
 | Hutool | 5.7.17 | 工具库（JSON、加密、随机数等） |
 | Lombok | 内置 | 简化实体代码 |
 | AspectJ | 内置 | 提供 Spring AOP 支持；当前秒杀事务位于独立的 `VoucherOrderHandler` Bean |
@@ -139,8 +139,12 @@ dishreview/
 ├── nginx/
 │   ├── conf/nginx.conf                  # Nginx 站点配置（含安全响应头）
 │   └── html/dishreview/                 # 前端页面（HTML/CSS/JS 静态资源）
-└── docs/learning/                       # 项目学习笔记
-    └── 09-rabbitmq-seckill-flow.md      # RabbitMQ 秒杀链路与验收
+└── docs/
+    ├── learning/                        # 项目学习笔记
+    │   ├── 08-interview-and-secondary-development-guide.md
+    │   └── 09-rabbitmq-seckill-flow.md  # RabbitMQ 秒杀链路与验收
+    └── development/
+        └── 10-rabbitmq-seckill-reliability-development-spec.md  # 可靠性闭环开发规格
 ```
 
 ---
@@ -161,10 +165,13 @@ dishreview/
 | `tb_voucher` | 优惠券（普通券/秒杀券） | `shop_id` |
 | `tb_seckill_voucher` | 秒杀券库存与时间窗 | 以 `voucher_id` 为主键，与券一对一 |
 | `tb_voucher_order` | 秒杀订单 | RedisIdWorker 生成 ID；`uk_voucher_order_user_voucher(user_id, voucher_id)` 保证一人一单 |
-| `tb_seckill_order_event` | 秒杀消息事件 | PENDING/CONFIRMED/CONSUMED/FAILED 状态、发布补偿与消费失败记录 |
+| `tb_seckill_order_event` | 秒杀消息事件（Outbox 核心） | 10 态主状态机、`row_version` CAS、`lease_owner/lease_until/lease_token` 租约、`(status, next_retry_time, lease_until)` 任务扫描索引 |
+| `tb_seckill_publish_attempt` | 发布尝试证据 | 每次实际发送一行，记录 Confirm/Return/同步异常；`uk(event_id, attempt_no)` 唯一 |
+| `tb_seckill_failure_case` | 失败记录 | 承接 DLQ、回滚异常与对账冲突；`idempotency_key` 唯一索引防重复落库 |
+| `tb_seckill_failure_audit` | 失败处置审计 | 人工重放/回滚/关闭操作的操作者、时间与原因 |
 | `tb_sign` | 签到表（预留，签到实际存储于 Redis BitMap） | — |
 
-> 增量脚本位于 `db/migration/`：关注索引和订单一人一单唯一索引均已提供；项目未内置自动迁移框架，执行前需检查目标环境。
+> 增量脚本位于 `db/migration/`：关注索引、订单一人一单唯一索引、事件表及可靠性升级（新列 + 三张新表）均已提供；项目未内置自动迁移框架，执行前需检查目标环境。
 
 ---
 
@@ -211,7 +218,11 @@ mysql -u root -p < src/main/resources/db/dish_review.sql
 mysql -u root -p dish_review < src/main/resources/db/migration/20260803_add_follow_indexes.sql
 mysql -u root -p dish_review < src/main/resources/db/migration/20260819_add_voucher_order_unique_index.sql
 mysql -u root -p dish_review < src/main/resources/db/migration/20260820_add_seckill_order_event.sql
+mysql -u root -p dish_review < src/main/resources/db/migration/20260821_seckill_reliability_upgrade.sql
+mysql -u root -p dish_review < src/main/resources/db/migration/20260822_add_seckill_failure_audit.sql
 ```
+
+> 秒杀可靠性升级（`20260821`/`20260822`）只增加列和新表，不修改已执行的旧迁移；存量 `FAILED` 事件需按规格 17.1 节迁移为 `MANUAL_REVIEW`，禁止直接转为 `ROLLED_BACK`。
 
 ### 2. 配置连接信息
 
@@ -359,7 +370,9 @@ Feed 流滚动分页示例（首次 `lastId=当前时间戳, offset=0`，后续�
 | POST | `/voucher` | 新增普通券 | 需登录 |
 | POST | `/voucher/seckill` | 新增秒杀券（含库存与时间窗） | 需登录 |
 | GET | `/voucher/list/{shopId}` | 店铺优惠券列表 | 公开 |
-| POST | `/voucher-order/seckill/{id}` | 秒杀下单，返回订单 id | 需登录 |
+| POST | `/voucher-order/seckill/{id}` | 秒杀下单，返回订单 id（异步受理，不代表订单已落库） | 需登录 |
+| GET | `/voucher-order/status/{voucherId}/{orderId}` | 查询当前用户订单处理状态（推荐）：通过券维度 orderId 反向索引直接定位 Redis 预留 | 需登录 |
+| GET | `/voucher-order/status/{orderId}` | 旧版订单状态查询（兼容保留）：仅查 MySQL 订单与事件，无法定位 Redis 预留时返回 `UNAVAILABLE` | 需登录 |
 
 ### 文件上传
 
@@ -378,14 +391,17 @@ Feed 流滚动分页示例（首次 `lastId=当前时间戳, offset=0`，后续�
 - **缓存击穿**：`queryWithLogicalExpire` 采用**逻辑过期**方案，过期后通过互斥锁（SETNX）只允许一个线程回源数据库并异步重建缓存，其余请求先返回旧数据，保证高并发下缓存雪崩保护。
 - **缓存一致性**：商铺更新采用「先更新数据库、再删除缓存」策略。
 
-### 2. 秒杀：Lua 预扣 + RabbitMQ 异步落库
+### 2. 秒杀：预留账本 + Outbox + 对账的可靠性闭环
 
-- 时间窗校验（未开始/已结束直接拒绝）。
-- 请求先校验活动时间，再调用 `SeckillVoucherLuaExecutor` 原子扣减 Redis 库存并记录用户集合。
-- 预扣成功后写入 `tb_seckill_order_event` 的 `PENDING` 记录，再用持久化消息和 `CorrelationData` 发布到 RabbitMQ。
-- Confirm ACK 标记 `CONFIRMED`；NACK/Return 先标记 `FAILED`，成功后用回滚 Lua 恢复库存和用户集合。
-- 发布结果未知时由事件表按 1、2、4 秒有限补偿；消费者事务内条件扣 MySQL 库存、写订单并标记 `CONSUMED`。
-- 数据库联合唯一索引和消费者重复键分支共同保证幂等；监听重试耗尽的消息进入死信队列。
+- 时间窗校验（未开始/已结束直接拒绝）；`eventId/orderId` 在 Lua 前生成，重发复用原 ID。
+- `SeckillVoucherLuaExecutor` 一次 Lua 原子完成库存预扣、用户集合登记、预留账本写入和 orderId 反向索引登记（同 hash tag 六个 Key 同槽，兼容 Redis Cluster）。
+- 请求线程只尽力写 `PENDING` 事件后即返回；事件写入失败不回滚 Redis，由对账任务按预留账本补建事件。
+- Outbox 发布任务是唯一生产者入口：CAS + 租约抢占到期事件，同一事务内创建发布尝试记录并递增 `retry_count`，事务提交后调用一次 `convertAndSend`；`spring.rabbitmq.template.retry` 已禁用，避免双层重试相乘。
+- Confirm/Return 回调只按 `attemptId` 落发送证据，统一由 `SeckillOrderFailureDecisionService` 决策：订单存在优先收敛 CONSUMED；存在 ACK 且无 Return 的可路由尝试或未知尝试时禁止回滚；全部尝试明确失败才进入 `ROLLBACK_PENDING`。
+- 消费者事务内先 CAS 锁定事件状态（处理回滚并发），再条件扣 MySQL 库存、写订单、标记 `CONSUMED`；异常分为可重试/永久消息/一致性三类，重试耗尽先落 `tb_seckill_failure_case` 再拒绝进 DLQ。
+- `SeckillReservationRollbackTask` 持久化执行按 `eventId` 校验的回滚 Lua（失败退避 5/30/300/1800 秒）；`SeckillOrderReconciliationTask` 双向对账（Redis 预留→MySQL 事件、事件→Redis 预留、库存账面一致性），采用"最近 7 天快速扫描 + 每小时全量游标分页兜底"两层任务，任意历史券的孤儿预留都有发现入口；信息不完整的异常预留写人工失败单后原子移出待对账集合并转入人工处理集合（`seckill:reservation:manual:{voucherId}`），不会阻塞排在其后的正常预留；`SeckillStockInitScanTask` 扫描缺失库存并安全原子初始化。
+- DLQ 消费者补充 `x-death` 证据；失败处置 Service（重放/回滚/关闭 + 审计）暂不开放 Controller，待 RBAC 完成后暴露。
+- 数据库联合唯一索引、消费者重复键分支和订单状态查询接口（多源裁决）共同保证幂等与可观测。
 
 ### 3. Feed 流：推模式 + 滚动分页
 
@@ -447,6 +463,7 @@ mvn test
 | --- | --- | --- |
 | `FeatureCompletionTests` | 单元测试 | 签到位运算、UserDTO 脱敏、Redis Key 构造、Result/ScrollResult、Feed 滚动分页 offset 计算（不依赖外部服务） |
 | `SecurityFixTests` | 单元测试 | 上传白名单、密码加盐、XSS 转义等安全逻辑（不依赖外部服务） |
+| `SeckillOrderEventServiceTests` 等 | 单元测试 | 秒杀可靠性闭环：状态机迁移、CAS/租约、发布尝试证据、失败决策、回滚任务（含 `SeckillRollbackRetryPolicyTests` 退避断言）、对账任务（含全量兜底扫描、异常预留安全移交人工）、DLQ 消费者、监听前 ErrorHandler、库存安全初始化、订单状态查询、失败处置 Service、路径穿越用例矩阵（共 185 个测试） |
 | `FeatureIntegrationTests` | 集成测试 | 启动完整 Spring 上下文，验证核心 Service Bean 装配（依赖 MySQL/Redis） |
 
 ---
@@ -488,8 +505,8 @@ mvn test
 **Q2：登录时收不到验证码？**
 当前默认 `dish-review.sms-code-mode: test`，验证码由接口直接返回（前端可直接使用）；`prod` 模式才走真实短信通道。另外注意 60 秒频率限制与单日错误次数上限。
 
-**Q3：秒杀下单提示「请勿重复下单」？**
-同一用户并发抢购时分布式锁会拒绝重复请求；若提示「用户已下过订单」，说明该用户已成功下单，实现了一人一单。
+**Q3：秒杀下单返回了订单 id，订单一定创建成功了吗？**
+不一定。返回值表示请求已通过 Redis 原子预留并尽力创建 PENDING 事件，属于异步受理；订单由 Outbox 发布任务投递到 RabbitMQ 后由消费者在事务内落库。可调用 `GET /voucher-order/status/{voucherId}/{orderId}` 查询 `PROCESSING/SUCCESS/FAILED/MANUAL_REVIEW/NOT_FOUND/UNAVAILABLE`（旧接口 `/status/{orderId}` 兼容保留，无法定位 Redis 预留时返回 `UNAVAILABLE`）。同一用户重复抢购会先被 Redis 用户集合拦截；数据库联合唯一索引兜底一人一单。
 
 **Q4：上传图片失败？**
 检查图片格式是否在白名单（jpg/jpeg/png/gif/webp/bmp）、大小是否超过 5MB；并确认 `SystemConstants.IMAGE_UPLOAD_DIR` 配置的上传目录存在且有写权限。

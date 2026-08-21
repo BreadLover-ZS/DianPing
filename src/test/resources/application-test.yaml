@@ -1,0 +1,8 @@
+# test profile：仅供单元/集成测试使用
+#
+# 【测试隔离】禁用全部秒杀定时任务（Outbox 发布、确认超时、持久化回滚、
+# 双向对账、库存缺失扫描），防止 mvn test 访问或修改远程 MySQL/Redis 业务状态。
+# 主配置 application.yaml 中 matchIfMissing=true 保持生产默认开启不变。
+dish-review:
+  seckill:
+    tasks-enabled: false

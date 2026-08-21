@@ -1,40 +1,45 @@
 package com.dish.review.mq;
 
-import com.dish.review.dto.SeckillOrderMessage;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 
 /**
- * 发布确认关联数据；用 eventId 匹配回调，并保留 Redis 回滚所需业务 ID。
+ * 发布确认关联数据。
+ *
+ * <p>id 使用 attemptId：每次实际 convertAndSend 都有独立关联，
+ * Confirm Future 完成时可同时读取 Confirm 结果和 ReturnedMessage，
+ * 不会把多次发送的确认混在同一个 eventId 上。</p>
  */
 public class SeckillOrderCorrelationData extends CorrelationData {
 
+    private final String eventId;
+
     private final Long orderId;
-    private final Long userId;
-    private final Long voucherId;
 
     /**
-     * 从待发布消息复制事件 ID、订单 ID、用户 ID 和优惠券 ID。
+     * 以 attemptId 作为关联 ID，同时保留 eventId 供回调定位事件。
      */
-    public SeckillOrderCorrelationData(SeckillOrderMessage message) {
-        super(message.getEventId());
+    public SeckillOrderCorrelationData(
+            String attemptId,
+            String eventId,
+            Long orderId) {
 
-        this.orderId = message.getOrderId();
-        this.userId = message.getUserId();
-        this.voucherId = message.getVoucherId();
+        super(attemptId);
+
+        this.eventId = eventId;
+        this.orderId = orderId;
     }
 
-    /** 返回 Redis 回滚所需的用户 ID。 */
-    public Long getUserId() {
-        return userId;
+    /**
+     * 返回本次发送所属的事件 ID。
+     */
+    public String getEventId() {
+        return eventId;
     }
 
-    /** 返回日志和订单定位所需的订单 ID。 */
+    /**
+     * 返回日志和订单定位所需的订单 ID。
+     */
     public Long getOrderId() {
         return orderId;
-    }
-
-    /** 返回 Redis 回滚所需的优惠券 ID。 */
-    public Long getVoucherId() {
-        return voucherId;
     }
 }

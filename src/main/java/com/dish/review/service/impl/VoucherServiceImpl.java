@@ -2,16 +2,17 @@ package com.dish.review.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.dish.review.dto.Result;
+import com.dish.review.entity.SeckillFailureCase;
 import com.dish.review.entity.Voucher;
 import com.dish.review.mapper.VoucherMapper;
 import com.dish.review.entity.SeckillVoucher;
 import com.dish.review.service.ISeckillVoucherService;
 import com.dish.review.service.IVoucherService;
+import com.dish.review.service.SeckillFailureCaseService;
+import com.dish.review.service.SeckillVoucherLuaExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import com.dish.review.utils.RedisConstants;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -32,7 +33,10 @@ import java.util.List;
 public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> implements IVoucherService {
 
     @Resource
-    private StringRedisTemplate stringRedisTemplate;
+    private SeckillVoucherLuaExecutor luaExecutor;
+
+    @Resource
+    private SeckillFailureCaseService failureCaseService;
 
     @Resource
     private ISeckillVoucherService seckillVoucherService;
@@ -81,28 +85,84 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         );
     }
 
-    //新建秒杀优惠卷在Redis中的初始化
+    /**
+     * Redis 库存安全原子初始化（规格第 14 节）。
+     *
+     * <p>通过 Lua 原子脚本初始化：库存 Key 已存在按幂等成功处理，不覆盖；
+     * 库存缺失但存在历史用户或预留数据时返回冲突，写失败记录转人工，
+     * 禁止清空已有数据；只有相关 Key 全部不存在时才写入初始库存。
+     * 禁止无条件 delete(orderKey)。初始化失败时由缺失库存扫描任务补偿。</p>
+     */
     private void initializeRedisStock(Long voucherId, Integer stock) {
-        String hashTag = "{" + voucherId + "}";
-
-        String stockKey =
-                RedisConstants.SECKILL_STOCK_KEY + hashTag;
-
-        String orderKey =
-                RedisConstants.SECKILL_ORDER_KEY + hashTag;
-
         try {
-            stringRedisTemplate.delete(orderKey);
-            stringRedisTemplate.opsForValue().set(
-                    stockKey,
-                    stock.toString()
-            );
-        } catch (Exception e) {
+            Long result = luaExecutor.initStock(voucherId, stock);
+
+            if (Long.valueOf(0L).equals(result)) {
+                log.info(
+                        "Redis 秒杀库存已存在，按幂等成功处理，voucherId={}",
+                        voucherId
+                );
+                return;
+            }
+
+            if (Long.valueOf(1L).equals(result)) {
+                log.info(
+                        "Redis 秒杀库存初始化成功，voucherId={}，stock={}",
+                        voucherId,
+                        stock
+                );
+                return;
+            }
+
+            // -1：库存缺失但存在历史用户/预留数据，禁止清空，转人工
+            recordStockInitConflict(voucherId, stock, result);
+        } catch (Exception exception) {
             log.error(
-                    "初始化 Redis 秒杀库存失败，voucherId={}",
+                    "[SECKILL_STOCK_INIT_UNAVAILABLE] "
+                            + "Redis 秒杀库存初始化执行失败，"
+                            + "等待缺失库存扫描任务补偿，voucherId={}，stock={}",
                     voucherId,
-                    e
+                    stock,
+                    exception
             );
         }
+    }
+
+    /**
+     * 库存初始化冲突：写失败记录转人工处理，禁止仅靠日志兜底。
+     */
+    private void recordStockInitConflict(
+            Long voucherId, Integer stock, Long luaResult) {
+
+        SeckillFailureCase failureCase = new SeckillFailureCase();
+
+        failureCase.setIdempotencyKey("STOCK_INIT:" + voucherId);
+        failureCase.setVoucherId(voucherId);
+        failureCase.setSource(SeckillFailureCase.SOURCE_RECONCILE);
+        failureCase.setStatus(SeckillFailureCase.STATUS_OPEN);
+        failureCase.setErrorCode("stock_init_conflict");
+        failureCase.setErrorMessage(
+                "库存 Key 缺失但存在历史用户或预留数据，禁止自动初始化，"
+                        + "luaResult=" + luaResult + "，stock=" + stock
+        );
+        failureCase.setReplayCount(0);
+
+        try {
+            failureCaseService.recordFailure(failureCase);
+        } catch (Exception persistenceException) {
+            log.error(
+                    "库存初始化冲突的失败记录写入失败，voucherId={}",
+                    voucherId,
+                    persistenceException
+            );
+        }
+
+        log.error(
+                "[SECKILL_STOCK_INIT_CONFLICT] "
+                        + "Redis 秒杀库存初始化冲突，存在历史用户或预留数据，"
+                        + "禁止清空，已转人工处理，voucherId={}，luaResult={}",
+                voucherId,
+                luaResult
+        );
     }
 }

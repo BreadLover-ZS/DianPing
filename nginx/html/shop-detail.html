@@ -222,8 +222,10 @@
         // 秒杀抢购
         axios.post("/voucher-order/seckill/" + id)
         .then(({data}) => {
-          // 抢购成功，这里输出订单id，支付功能TODO
-          this.$message.success("抢购成功，订单id：" + data)
+          // 抢购成功：data = {orderId, voucherId}（异步受理，不代表订单已落库）
+          // voucherId 即当前券 id，可用于调用订单状态接口
+          // GET /voucher-order/status/{voucherId}/{orderId}，支付功能TODO
+          this.$message.success("抢购成功，订单id：" + data.orderId)
         })
         .catch(this.$message.error)
       }
