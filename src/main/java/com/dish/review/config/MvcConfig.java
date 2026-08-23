@@ -38,6 +38,10 @@ public class MvcConfig implements WebMvcConfigurer {
                         // 注意：POST /shop, PUT /shop, POST /voucher, POST /voucher/seckill
                         //       均不在排除列表中，需要登录认证
                 ).order(1);
+        // 管理写接口必须具备 ADMIN 角色；查询接口不受此拦截器影响。
+        registry.addInterceptor(new com.dish.review.utils.AdminInterceptor())
+                .addPathPatterns("/shop", "/voucher", "/voucher/**")
+                .order(2);
         // Token 刷新拦截器：拦截所有请求，从 Redis 中恢复用户信息并刷新 Token 有效期
         registry.addInterceptor(new RefreshTokenInterceptor(stringRedisTemplate)).addPathPatterns("/**").order(0);
     }

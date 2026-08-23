@@ -238,7 +238,7 @@ Lua 返回非零或抛异常时，不允许继续创建新事件和发布消息�
 - `ROLLED_BACK` 后收到迟到消息时禁止创建订单，记录异常并 ACK 隔离。
 - 消费者遇到 `ROLLBACK_PENDING`，只有 CAS 成功取消回滚后才可继续。
 - 消费者遇到 `ROLLBACK_EXECUTING`，抛出可重试异常，等待回滚状态收敛。
-- 所有状态更新必须带当前状态或 `row_version` 条件，禁止无条件覆盖。
+- 所有状态更新必须带当前状态、租约令牌等实际并发条件，禁止无条件覆盖；`row_version` 当前只记录状态变更次数，不单独承担 CAS。
 - 当前项目没有配置 MyBatis-Plus 乐观锁插件；Trae 应使用明确的条件 UPDATE/CAS，或者先显式增加并验证插件，不能只添加 `@Version` 就假设乐观锁已经生效。
 
 ### 6.3 扩展事件表
@@ -252,7 +252,7 @@ rollback_retry_count  回滚执行次数
 lease_owner           当前任务实例
 lease_until           任务租约到期时间
 lease_token           每次抢占生成的 fencing token
-row_version           乐观锁版本
+row_version           状态变更计数（当前不作为 WHERE 乐观锁条件）
 last_error_code       稳定错误码
 confirmed_at          Broker 确认时间
 consumed_at           订单完成时间

@@ -1,5 +1,7 @@
 package com.dish.review.service.impl;
 
+import cn.hutool.http.HtmlUtil;
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.dish.review.dto.Result;
 import com.dish.review.entity.BlogComments;
@@ -38,7 +40,9 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
     public Result queryComments(Long blogId) {
         List<BlogComments> comments = query()
                 .eq("blog_id", blogId)
+                .eq("status", 0)
                 .orderByDesc("create_time")
+                .last("LIMIT 100")
                 .list();
         return Result.ok(comments);
     }
@@ -56,15 +60,20 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
         if (comment == null || comment.getBlogId() == null) {
             return Result.fail("博客参数无效");
         }
+        if (StrUtil.isBlank(comment.getContent())
+                || comment.getContent().length() > 255) {
+            return Result.fail("评论内容不能为空且不能超过255字");
+        }
         if (blogService.getById(comment.getBlogId()) == null) {
             return Result.fail("博客不存在");
         }
         Long userId = UserHolder.getUser().getId();
         comment.setUserId(userId);
+        comment.setContent(HtmlUtil.escape(comment.getContent().trim()));
         comment.setCreateTime(LocalDateTime.now());
         comment.setLiked(0);
-        // status：false 表示正常（0），true 表示被举报/禁止
-        comment.setStatus(false);
+        // status：0 表示正常，1/2 表示被举报或禁止查看
+        comment.setStatus(0);
         boolean success = save(comment);
         if (!success) {
             return Result.fail("评论失败");

@@ -4,7 +4,7 @@ DishReview 是一个基于 **Java 8、Spring Boot 2.3、MyBatis-Plus、MySQL、R
 
 项目包含登录会话、商铺缓存、附近商铺、探店笔记、点赞、关注 Feed、签到和优惠券等业务。当前重点是秒杀链路：它不是简单地“Redis 扣库存后发一条 MQ”，而是实现了 Redis 预占账本、MySQL Outbox、发布证据、异步回调、统一决策、消费幂等、持久化回滚、DLQ 和双向对账。
 
-> 项目已经完成代码、迁移脚本和单元测试层面的可靠性建设，但不宣称经过生产流量、百万 QPS、零消息丢失或完整故障演练。RabbitMQ 实机、并发和宕机恢复仍需在目标环境验收。
+> 项目已经形成可读的秒杀可靠性主线，但不宣称经过生产流量、百万 QPS、零消息丢失或完整故障演练。本轮 JDK 8 自动化测试已通过；RabbitMQ 实机、真实数据库事务、并发和宕机恢复仍需在目标环境验收。
 
 ## 目录
 
@@ -39,19 +39,19 @@ DishReview 是一个基于 **Java 8、Spring Boot 2.3、MyBatis-Plus、MySQL、R
 | 签到 | Redis BitMap 按月签到，位运算统计连续签到 |
 | 优惠券 | 普通券、秒杀券、活动时间窗与库存管理 |
 | 秒杀订单 | Redis Lua 预占、Outbox 发布、RabbitMQ 消费、状态查询、回滚、对账和失败处置 |
-| 文件上传 | 图片扩展名与大小校验、删除路径穿越防护 |
+| 文件上传 | 图片扩展名、大小与文件魔数校验；按用户目录隔离删除权限 |
 
 ### 当前能力边界
 
 | 项目 | 状态 |
 |---|---|
 | 秒杀可靠性代码、表结构与任务 | 已实现 |
-| 单元测试与 Spring 装配测试 | 仓库内已提供 |
+| 单元测试与 Spring 装配测试 | JDK 8 下 200 个测试通过，0 failure、0 error、0 skipped |
 | RabbitMQ 消费者 | 默认关闭，需显式设置环境变量开启 |
 | 真实 RabbitMQ 故障注入 | 尚不能写成已验收能力 |
 | 高并发压测与容量结论 | 尚无可复现报告 |
 | 失败工单人工处置 | Service 和审计已实现；Controller 因缺少 RBAC 暂未开放 |
-| 生产短信 | 未接入真实供应商，默认测试模式 |
+| 生产短信 | 未接入真实供应商；生产模式缺少通道时拒绝伪造成功 |
 | 商铺逻辑过期缓存 | 保留实现供学习，当前详情查询默认使用缓存穿透方案 |
 
 ---
@@ -382,6 +382,8 @@ RabbitMQ Broker、MySQL、Redis 和 Nginx 由运行环境提供，仓库未包�
 mysql -u <user> -p < src/main/resources/db/dish_review.sql
 ```
 
+基础脚本只负责演示数据和基础表结构；秒杀可靠性、角色、迟到 Confirm 证据和查询索引仍需继续按下面顺序执行迁移。
+
 已有数据库按顺序检查并执行增量迁移：
 
 ```bash
@@ -390,9 +392,14 @@ mysql -u <user> -p dish_review < src/main/resources/db/migration/20260819_add_vo
 mysql -u <user> -p dish_review < src/main/resources/db/migration/20260820_add_seckill_order_event.sql
 mysql -u <user> -p dish_review < src/main/resources/db/migration/20260821_seckill_reliability_upgrade.sql
 mysql -u <user> -p dish_review < src/main/resources/db/migration/20260822_add_seckill_failure_audit.sql
+mysql -u <user> -p dish_review < src/main/resources/db/migration/20260823_add_user_role.sql
+mysql -u <user> -p dish_review < src/main/resources/db/migration/20260823_add_late_confirm_evidence.sql
+mysql -u <user> -p dish_review < src/main/resources/db/migration/20260823_add_query_indexes.sql
 ```
 
 项目没有集成 Flyway/Liquibase，不会自动执行这些脚本。生产或已有数据环境必须先备份并审查迁移中的前置检查。
+
+角色迁移默认把历史用户设为 `USER`；只有确认操作者身份后，才执行迁移脚本末尾的管理员更新示例。管理写接口包括商铺和优惠券新增/修改，普通用户只保留查询权限。
 
 ### 3. 配置中间件
 
@@ -413,6 +420,9 @@ export RABBITMQ_PORT=5672
 export RABBITMQ_USERNAME=dish_review
 export RABBITMQ_PASSWORD='<your-password>'
 export RABBITMQ_VHOST=/dish-review
+
+# 生产部署必须显式启用生产配置，短信和管理端点边界才会按生产值生效
+export SPRING_PROFILES_ACTIVE=prod
 ```
 
 RabbitMQ 拓扑由 `RabbitMqConfig` 声明，包括持久化 DirectExchange、主队列、DLX 和 DLQ。
@@ -438,7 +448,7 @@ curl http://localhost:8081/shop-type/list
 export SECKILL_RABBIT_CONSUMER_ENABLED=true
 ```
 
-重新启动应用后，`SeckillOrderConsumer` 才会监听主队列。秒杀后台任务默认启用，可通过 `dish-review.seckill.tasks-enabled` 统一控制。
+重新启动应用后，`SeckillOrderConsumer` 才会监听主队列。秒杀后台任务默认关闭，确认依赖和配置后再设置 `SECKILL_TASKS_ENABLED=true` 统一开启。
 
 ### 6. 启动前端
 
@@ -454,6 +464,8 @@ export SECKILL_RABBIT_CONSUMER_ENABLED=true
 | `REDIS_HOST/PORT/PASSWORD` | Redis 连接 |
 | `RABBITMQ_HOST/PORT/USERNAME/PASSWORD/VHOST` | RabbitMQ 连接 |
 | `SECKILL_RABBIT_CONSUMER_ENABLED` | 是否启动秒杀主队列消费者 |
+| `SECKILL_TASKS_ENABLED` | 是否启动 Outbox、确认超时、回滚、对账和库存扫描任务，默认 false |
+| `IMAGE_UPLOAD_DIR` | 图片存储根目录，默认 `./data/images` |
 | `SECKILL_OUTBOX_BATCH_SIZE` | Outbox 每批候选事件数，默认 20 |
 | `SECKILL_OUTBOX_LEASE_SECONDS` | 发布租约时长，默认 60 秒 |
 | `SECKILL_CONFIRM_TIMEOUT_SECONDS` | Confirm 超时，默认 30 秒 |
@@ -524,8 +536,10 @@ authorization: <token>
 运行测试：
 
 ```bash
-mvn test
+./mvnw test
 ```
+
+Windows 使用 `mvnw.cmd test`。Wrapper 固定 Maven 3.8.8，首次运行需要联网下载该版本。
 
 仓库测试主要覆盖：
 
@@ -556,21 +570,19 @@ mvn test
 
 - Token 会话滑动续期与登出失效；
 - `ThreadLocal` 请求结束清理；
-- 验证码发送频率和错误次数限制；
+- BCrypt 密码与旧 MD5 渐进升级；验证码 Lua 原子校验和发送频率限制；
 - 对外使用不含手机号、密码的 `UserDTO`；
 - 笔记标题和内容 HTML 转义；
-- 上传扩展名/大小限制和删除路径穿越检查；
-- 写接口需要登录；
+- 上传扩展名/大小/魔数限制、删除路径穿越和用户目录所有权检查；
+- 商铺和优惠券写接口需要 ADMIN；
 - Nginx 安全响应头模板。
 
 ### 仍需改进
 
-- 密码目前为随机盐 + MD5，生产环境应升级为 BCrypt/Argon2；
-- 图片校验仍应补充 MIME、魔数、恶意内容扫描和对象存储隔离；
+- 真实短信供应商、对象存储和恶意内容扫描尚未接入；
 - 失败工单 Controller 需要 RBAC 和审批后才能开放；
 - RabbitMQ 管理端口和 AMQP 端口不应直接暴露公网；
-- 配置文件中的开发凭据应迁移到密钥管理系统并轮换；
-- 项目尚未提供正式 CI、容器编排、监控平台和容量报告。
+- 项目尚未提供正式 CI、容器编排、完整故障演练和容量报告。
 
 ---
 
@@ -583,6 +595,7 @@ mvn test
 | [09 RabbitMQ 秒杀源码阅读手册](docs/learning/09-rabbitmq-seckill-flow.md) | 按决策、回调、租约、消费、回滚和对账阅读 MQ 源码 |
 | [10 秒杀可靠性开发规格](docs/development/10-rabbitmq-seckill-reliability-development-spec.md) | 状态、表结构和实现约束 |
 | [11 秒杀可靠性交付报告](docs/development/11-rabbitmq-seckill-reliability-delivery-report.md) | 已交付内容、验证证据和剩余边界 |
+| [12 项目全面审查与改进路线](docs/development/12-project-comprehensive-review-and-improvement-roadmap.md) | 面试向审查结论、优先级和后续验收清单 |
 
 推荐顺序：先读 README 建立全局结构，再读 `09` 沿源码理解 MQ，最后用 `08` 做面试复盘。
 

@@ -88,6 +88,13 @@ class SeckillOrderPublishRetryTaskTests {
         return attempt;
     }
 
+    private SeckillOrderEvent claimedEvent(int retryCount, long leaseToken) {
+        SeckillOrderEvent event = event(retryCount);
+        event.setLeaseOwner((String) ReflectionTestUtils.getField(task, "owner"));
+        event.setLeaseToken(leaseToken);
+        return event;
+    }
+
     @Test
     void exhaustedEventEscalatesToManualReviewWithoutSending() {
         when(eventService.findDueForPublish(20))
@@ -97,6 +104,9 @@ class SeckillOrderPublishRetryTaskTests {
         when(eventService.claimLease(
                 eq("event-1"), anyString(), eq(60)))
                 .thenReturn(11L);
+        when(eventService.findById("event-1"))
+                .thenReturn(claimedEvent(
+                        SeckillPublishRetryPolicy.maxAutomaticAttempts(), 11L));
         when(failureCaseService.recordManualReviewEscalation(
                 any(SeckillOrderEvent.class),
                 eq(SeckillFailureCase.SOURCE_PUBLISH),
@@ -127,6 +137,10 @@ class SeckillOrderPublishRetryTaskTests {
         when(eventService.claimLease(
                 eq("event-1"), anyString(), eq(60)))
                 .thenReturn(11L);
+        when(eventService.findById("event-1"))
+                .thenReturn(claimedEvent(
+                        SeckillPublishRetryPolicy.maxAutomaticAttempts() - 1,
+                        11L));
         when(attemptService.createNextAttempt("event-1"))
                 .thenReturn(attempt(
                         SeckillPublishRetryPolicy.maxAutomaticAttempts()));
@@ -152,6 +166,8 @@ class SeckillOrderPublishRetryTaskTests {
         when(eventService.claimLease(
                 eq("event-1"), anyString(), eq(60)))
                 .thenReturn(11L);
+        when(eventService.findById("event-1"))
+                .thenReturn(claimedEvent(0, 11L));
         when(attemptService.createNextAttempt("event-1"))
                 .thenReturn(attempt(1));
         when(eventService.deferNextRetryTime(
@@ -171,6 +187,8 @@ class SeckillOrderPublishRetryTaskTests {
         when(eventService.claimLease(
                 eq("event-1"), anyString(), eq(60)))
                 .thenReturn(11L);
+        when(eventService.findById("event-1"))
+                .thenReturn(claimedEvent(0, 11L));
         when(attemptService.createNextAttempt("event-1"))
                 .thenReturn(attempt(1));
 
@@ -218,6 +236,23 @@ class SeckillOrderPublishRetryTaskTests {
 
         assertDoesNotThrow(() -> task.publishDueEvents());
 
+        verify(orderPublisher, never()).send(any(), any());
+    }
+
+    @Test
+    void staleLeaseSnapshotIsReleasedWithoutSending() {
+        when(eventService.findDueForPublish(20))
+                .thenReturn(Collections.singletonList(event(0)));
+        when(eventService.claimLease(
+                eq("event-1"), anyString(), eq(60)))
+                .thenReturn(11L);
+        SeckillOrderEvent stale = claimedEvent(0, 12L);
+        when(eventService.findById("event-1")).thenReturn(stale);
+
+        assertDoesNotThrow(() -> task.publishDueEvents());
+
+        verify(eventService).releaseLease("event-1", 11L);
+        verify(attemptService, never()).createNextAttempt(anyString());
         verify(orderPublisher, never()).send(any(), any());
     }
 }

@@ -71,7 +71,7 @@ public class UserInfo implements Serializable {
     /**
      * 会员级别，0~9级,0代表未开通会员
      */
-    private Boolean level;
+    private Integer level;
 
     /**
      * 创建时间

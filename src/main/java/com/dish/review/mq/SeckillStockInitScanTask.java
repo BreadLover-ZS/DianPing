@@ -32,7 +32,7 @@ import java.util.List;
 @ConditionalOnProperty(
         name = "dish-review.seckill.tasks-enabled",
         havingValue = "true",
-        matchIfMissing = true
+        matchIfMissing = false
 )
 public class SeckillStockInitScanTask {
 

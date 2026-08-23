@@ -101,6 +101,8 @@ public class UserController {
         }
         // 转为 UserDTO，避免泄露手机号、密码等敏感信息
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
+        // 角色只用于服务端鉴权，不暴露给他人主页接口。
+        userDTO.setRole(null);
         return Result.ok(userDTO);
     }
 

@@ -1,0 +1,26 @@
+management:
+  server:
+    port: ${MANAGEMENT_PORT:8082}
+    address: ${MANAGEMENT_ADDRESS:127.0.0.1}
+
+spring:
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT:3306}/dish_review?useSSL=true&serverTimezone=UTC
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+  redis:
+    host: ${REDIS_HOST}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD}
+  rabbitmq:
+    host: ${RABBITMQ_HOST}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME}
+    password: ${RABBITMQ_PASSWORD}
+    virtual-host: ${RABBITMQ_VHOST:/}
+
+dish-review:
+  sms-code-mode: prod
+  seckill:
+    rabbit-consumer-enabled: ${SECKILL_RABBIT_CONSUMER_ENABLED:false}
+    tasks-enabled: ${SECKILL_TASKS_ENABLED:false}

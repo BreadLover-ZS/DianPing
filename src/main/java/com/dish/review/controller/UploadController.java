@@ -3,13 +3,16 @@ package com.dish.review.controller;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import com.dish.review.dto.Result;
-import com.dish.review.utils.SystemConstants;
+import com.dish.review.dto.UserDTO;
+import com.dish.review.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -29,6 +32,10 @@ import java.util.UUID;
 @RestController
 @RequestMapping("upload")
 public class UploadController {
+
+    /** 图片根目录可由部署环境注入，默认使用项目目录下的 data/images。 */
+    @Value("${dish-review.storage.image-dir:./data/images}")
+    private String imageUploadDir = "./data/images";
 
     /**
      * 允许上传的文件扩展名白名单
@@ -73,9 +80,14 @@ public class UploadController {
                 return Result.fail("仅支持 jpg, jpeg, png, gif, webp, bmp 格式的图片");
             }
 
+            // 扩展名只是第一道校验，还要核对文件魔数，避免伪装成图片的脚本落盘。
+            if (!hasImageSignature(image)) {
+                return Result.fail("文件内容不是受支持的图片");
+            }
+
             // 5. 生成新文件名并保存
             String fileName = createNewFileName(originalFilename);
-            image.transferTo(new File(SystemConstants.IMAGE_UPLOAD_DIR, fileName));
+            image.transferTo(new File(imageUploadDir, relativePath(fileName)));
             log.debug("文件上传成功，{}", fileName);
             return Result.ok(fileName);
         } catch (IOException e) {
@@ -103,7 +115,7 @@ public class UploadController {
     public Result deleteBlogImg(@RequestParam("name") String filename) {
         try {
             java.nio.file.Path uploadPath = java.nio.file.Paths
-                    .get(SystemConstants.IMAGE_UPLOAD_DIR)
+                    .get(imageUploadDir)
                     .toAbsolutePath()
                     .normalize();
 
@@ -114,6 +126,11 @@ public class UploadController {
             if (targetPath == null) {
                 log.warn("检测到路径穿越攻击：filename={}", filename);
                 return Result.fail("非法的文件路径");
+            }
+
+            // 普通用户只能删除自己目录下的图片；管理员保留清理能力。
+            if (!isAdmin() && !isOwnedByCurrentUser(uploadPath, targetPath)) {
+                return Result.fail("无权删除该文件");
             }
 
             // 2. 校验不是目录
@@ -213,12 +230,89 @@ public class UploadController {
         int hash = name.hashCode();
         int d1 = hash & 0xF;
         int d2 = (hash >> 4) & 0xF;
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null) {
+            throw new IllegalStateException("未登录用户不能上传文件");
+        }
         // 判断目录是否存在
-        File dir = new File(SystemConstants.IMAGE_UPLOAD_DIR, StrUtil.format("/blogs/{}/{}", d1, d2));
+        File dir = new File(imageUploadDir,
+                StrUtil.format("blogs/{}/{}/{}", user.getId(), d1, d2));
         if (!dir.exists()) {
-            dir.mkdirs();
+            if (!dir.mkdirs() && !dir.isDirectory()) {
+                throw new IllegalStateException("上传目录创建失败");
+            }
         }
         // 生成文件名
-        return StrUtil.format("/blogs/{}/{}/{}.{}", d1, d2, name, suffix);
+        return StrUtil.format("/blogs/{}/{}/{}/{}.{}",
+                user.getId(), d1, d2, name, suffix);
+    }
+
+    /** 读取文件头魔数，阻止仅靠扩展名伪装的非图片文件。 */
+    private boolean hasImageSignature(MultipartFile image) throws IOException {
+        byte[] header = new byte[12];
+        int read = 0;
+        try (InputStream input = image.getInputStream()) {
+            int current;
+            while (read < header.length
+                    && (current = input.read(header, read, header.length - read)) != -1) {
+                read += current;
+            }
+        }
+        if (read < 4) {
+            return false;
+        }
+        if ((header[0] & 0xFF) == 0xFF
+                && (header[1] & 0xFF) == 0xD8
+                && (header[2] & 0xFF) == 0xFF) {
+            return true;
+        }
+        if (read >= 8
+                && (header[0] & 0xFF) == 0x89
+                && header[1] == 0x50 && header[2] == 0x4E
+                && header[3] == 0x47 && header[4] == 0x0D
+                && header[5] == 0x0A && header[6] == 0x1A
+                && header[7] == 0x0A) {
+            return true;
+        }
+        if (read >= 6
+                && header[0] == 'G' && header[1] == 'I'
+                && header[2] == 'F' && header[3] == '8'
+                && (header[4] == '7' || header[4] == '9')
+                && header[5] == 'a') {
+            return true;
+        }
+        if (header[0] == 'B' && header[1] == 'M') {
+            return true;
+        }
+        return read >= 12
+                && header[0] == 'R' && header[1] == 'I'
+                && header[2] == 'F' && header[3] == 'F'
+                && header[8] == 'W' && header[9] == 'E'
+                && header[10] == 'B' && header[11] == 'P';
+    }
+
+    private boolean isAdmin() {
+        UserDTO user = UserHolder.getUser();
+        return user != null && "ADMIN".equalsIgnoreCase(user.getRole());
+    }
+
+    private boolean isOwnedByCurrentUser(
+            java.nio.file.Path uploadPath,
+            java.nio.file.Path targetPath) {
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null
+                || uploadPath == null || targetPath == null) {
+            return false;
+        }
+        String normalized = relativePath(uploadPath.relativize(targetPath).toString());
+        String prefix = "blogs/" + user.getId() + "/";
+        return normalized.startsWith(prefix);
+    }
+
+    private String relativePath(String filename) {
+        if (filename == null) {
+            return "";
+        }
+        return filename.replace('\\', '/').replaceFirst("^/+", "");
     }
 }

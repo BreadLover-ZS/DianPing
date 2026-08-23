@@ -1,20 +1,32 @@
 server:
   port: 8081
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
 spring:
   application:
     name: dish-review
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
-    # 连接远程部署的 MySQL (115.29.220.133)
-    # 优先读取环境变量，未设置时使用远程服务器默认配置
-    url: jdbc:mysql://${MYSQL_HOST:115.29.220.133}:${MYSQL_PORT:3306}/dish_review?useSSL=false&serverTimezone=UTC
+    # 本地默认只连接 localhost；部署环境必须通过 profile/环境变量注入连接信息。
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/dish_review?useSSL=false&serverTimezone=UTC
     username: ${MYSQL_USER:root}
-    password: ${MYSQL_PASSWORD:MyStudy@2026_Sql}
+    password: ${MYSQL_PASSWORD:}
   redis:
-    # 连接远程部署的 Redis (115.29.220.133)
-    host: ${REDIS_HOST:115.29.220.133}
+    host: ${REDIS_HOST:localhost}
     port: ${REDIS_PORT:6379}
-    password: ${REDIS_PASSWORD:MyStudy@2026_Sql}
+    password: ${REDIS_PASSWORD:}
     lettuce:
       pool:
         max-active: 10
@@ -25,8 +37,8 @@ spring:
     # 默认连接本机开发环境；部署时通过环境变量注入连接信息
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USERNAME:guest}
-    password: ${RABBITMQ_PASSWORD:guest}
+    username: ${RABBITMQ_USERNAME:}
+    password: ${RABBITMQ_PASSWORD:}
     virtual-host: ${RABBITMQ_VHOST:/}
     connection-timeout: 3s
     # 开启相关发布确认和不可路由消息返回；业务回调将在生产者步骤实现
@@ -72,7 +84,11 @@ mybatis-plus:
 # 自定义业务配置
 dish-review:
   sms-code-mode: test
+  storage:
+    image-dir: ${IMAGE_UPLOAD_DIR:./data/images}
   seckill:
+    # 定时任务必须显式开启，避免开发/测试进程误扫共享环境。
+    tasks-enabled: ${SECKILL_TASKS_ENABLED:false}
     rabbit-consumer-enabled: ${SECKILL_RABBIT_CONSUMER_ENABLED:false}
     publish-retry-delay: ${SECKILL_PUBLISH_RETRY_DELAY:1000}
     # Outbox 发布任务参数

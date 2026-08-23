@@ -9,6 +9,8 @@ import com.dish.review.service.SeckillOrderFailureDecisionService;
 import com.dish.review.service.SeckillPublishAttemptService;
 import com.dish.review.service.SeckillPublishRetryPolicy;
 import lombok.extern.slf4j.Slf4j;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -35,7 +37,7 @@ import java.util.UUID;
 @ConditionalOnProperty(
         name = "dish-review.seckill.tasks-enabled",
         havingValue = "true",
-        matchIfMissing = true
+        matchIfMissing = false
 )
 public class SeckillOrderPublishRetryTask {
 
@@ -65,6 +67,10 @@ public class SeckillOrderPublishRetryTask {
      * 当前实例的租约持有者标识。
      */
     private final String owner;
+
+    /** 可选指标注册器：未启用 Actuator 时不影响任务核心链路。 */
+    @Autowired(required = false)
+    private MeterRegistry meterRegistry;
 
     /**
      * 注入事件服务、发布尝试服务、决策服务、生产者和失败记录服务；生成实例唯一租约标识。
@@ -111,6 +117,7 @@ public class SeckillOrderPublishRetryTask {
                 );
             }
         }
+        increment("seckill.outbox.scan", events.size());
     }
 
     /**
@@ -119,6 +126,8 @@ public class SeckillOrderPublishRetryTask {
     private void publishOneEvent(SeckillOrderEvent event) {
         String eventId = event.getEventId();
 
+        //claimLease：抢占租约
+        //
         Long leaseToken = eventService.claimLease(
                 eventId,
                 owner,
@@ -129,6 +138,16 @@ public class SeckillOrderPublishRetryTask {
             // 其他实例已抢占，或事件状态已经收敛
             return;
         }
+
+        // 租约更新后重新读取，避免用扫描阶段的 retryCount/message 快照发送。
+        SeckillOrderEvent claimedEvent = eventService.findById(eventId);
+        if (claimedEvent == null
+                || !owner.equals(claimedEvent.getLeaseOwner())
+                || !leaseToken.equals(claimedEvent.getLeaseToken())) {
+            eventService.releaseLease(eventId, leaseToken);
+            return;
+        }
+        event = claimedEvent;
 
         try {
             int completedAttempts = event.getRetryCount() == null
@@ -166,6 +185,7 @@ public class SeckillOrderPublishRetryTask {
             try {
                 // 一次调度只调用一次 convertAndSend；模板内部重试已关闭
                 orderPublisher.send(attempt, message);
+                increment("seckill.publish.attempt", 1);
             } catch (Exception exception) {
                 /*
                  * 同步异常：消息可能已经到达 Broker，也可能没有。
@@ -173,6 +193,7 @@ public class SeckillOrderPublishRetryTask {
                  * 禁止回滚 Redis。
                  */
                 recordSyncFailure(attempt, exception);
+                increment("seckill.publish.unknown", 1);
                 return;
             }
 
@@ -180,6 +201,12 @@ public class SeckillOrderPublishRetryTask {
         } finally {
             // 发布调用结束即释放租约；进程崩溃依靠租约过期重新领取
             eventService.releaseLease(eventId, leaseToken);
+        }
+    }
+
+    private void increment(String name, double amount) {
+        if (meterRegistry != null) {
+            meterRegistry.counter(name).increment(amount);
         }
     }
 

@@ -47,6 +47,14 @@ public class SeckillPublishAttempt implements Serializable {
 
     private LocalDateTime updateTime;
 
+    /** 超时/异常后迟到的 Confirm 只作旁证，不覆盖原 UNKNOWN/NACK 结论。 */
+    private LocalDateTime lateConfirmAt;
+
+    /** 迟到 Confirm 结果：1=ACK，2=NACK。 */
+    private Integer lateConfirmResult;
+
+    private String lateConfirmReason;
+
     /** Broker 尚未返回 Confirm。 */
     public static final int CONFIRM_WAITING = 0;
     /** Broker 确认接收。 */

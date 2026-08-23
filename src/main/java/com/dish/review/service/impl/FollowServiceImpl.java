@@ -83,11 +83,10 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
             }
         } else {
             // 取消关注：从数据库删除并移除 Redis Set 中的成员
-            boolean success = remove(new QueryWrapper<Follow>()
+            remove(new QueryWrapper<Follow>()
                     .eq("user_id", userId).eq("follow_user_id", followUserId));
-            if (success) {
-                stringRedisTemplate.opsForSet().remove(key, followUserId.toString());
-            }
+            // DB 已无关系也要幂等清理 Redis，避免脏成员永久残留。
+            stringRedisTemplate.opsForSet().remove(key, followUserId.toString());
         }
         return Result.ok();
     }
@@ -126,7 +125,11 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
         List<Long> ids = intersect.stream().map(Long::valueOf).collect(Collectors.toList());
         // 查询用户信息并转为 UserDTO，避免泄露敏感信息
         List<UserDTO> users = userService.listByIds(ids).stream()
-                .map(user -> BeanUtil.copyProperties(user, UserDTO.class))
+                .map(user -> {
+                    UserDTO dto = BeanUtil.copyProperties(user, UserDTO.class);
+                    dto.setRole(null);
+                    return dto;
+                })
                 .collect(Collectors.toList());
         return Result.ok(users);
     }

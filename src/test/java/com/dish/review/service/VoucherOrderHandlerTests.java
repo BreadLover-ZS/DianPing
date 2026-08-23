@@ -3,6 +3,7 @@ package com.dish.review.service;
 import com.dish.review.dto.SeckillOrderMessage;
 import com.dish.review.entity.SeckillOrderEvent;
 import com.dish.review.entity.SeckillVoucher;
+import com.dish.review.entity.VoucherOrder;
 import com.dish.review.exception.SeckillConsistencyException;
 import com.dish.review.exception.SeckillRetryableException;
 import com.dish.review.mapper.SeckillVoucherMapper;
@@ -47,8 +48,21 @@ class VoucherOrderHandlerTests {
     private SeckillOrderEvent eventOf(int status) {
         SeckillOrderEvent event = new SeckillOrderEvent();
         event.setEventId("event-1");
+        event.setOrderId(100L);
+        event.setUserId(7L);
+        event.setVoucherId(10L);
+        event.setCreatedAt(1234567890L);
+        event.setMessageVersion(1);
         event.setStatus(status);
         return event;
+    }
+
+    private VoucherOrder matchingOrder() {
+        VoucherOrder order = new VoucherOrder();
+        order.setId(100L);
+        order.setUserId(7L);
+        order.setVoucherId(10L);
+        return order;
     }
 
     @Test
@@ -88,7 +102,6 @@ class VoucherOrderHandlerTests {
                 .thenReturn(eventOf(
                         SeckillOrderEvent.STATUS_ROLLBACK_PENDING));
         when(eventService.cancelRollback("event-1")).thenReturn(true);
-        when(voucherOrderMapper.selectCount(any())).thenReturn(0);
         when(seckillVoucherMapper.update(any(), any())).thenReturn(1);
         when(voucherOrderMapper.insert(any())).thenReturn(1);
         when(eventService.markConsumed("event-1")).thenReturn(true);
@@ -134,7 +147,7 @@ class VoucherOrderHandlerTests {
     void existingOrderMarksConsumedWithoutStockDeduction() {
         when(eventService.lockEvent("event-1"))
                 .thenReturn(eventOf(SeckillOrderEvent.STATUS_CONFIRMED));
-        when(voucherOrderMapper.selectCount(any())).thenReturn(1);
+        when(voucherOrderMapper.selectOne(any())).thenReturn(matchingOrder());
         when(eventService.markConsumed("event-1")).thenReturn(true);
 
         assertDoesNotThrow(() -> handler.createOrder(message));
@@ -147,7 +160,6 @@ class VoucherOrderHandlerTests {
     void insufficientMySqlStockIsConsistencyConflict() {
         when(eventService.lockEvent("event-1"))
                 .thenReturn(eventOf(SeckillOrderEvent.STATUS_CONFIRMED));
-        when(voucherOrderMapper.selectCount(any())).thenReturn(0);
         when(seckillVoucherMapper.update(
                 any(), any())).thenReturn(0);
 
@@ -159,7 +171,6 @@ class VoucherOrderHandlerTests {
     void orderInsertFailureIsRetryable() {
         when(eventService.lockEvent("event-1"))
                 .thenReturn(eventOf(SeckillOrderEvent.STATUS_CONFIRMED));
-        when(voucherOrderMapper.selectCount(any())).thenReturn(0);
         when(seckillVoucherMapper.update(any(), any())).thenReturn(1);
         when(voucherOrderMapper.insert(any())).thenReturn(0);
 
@@ -171,7 +182,6 @@ class VoucherOrderHandlerTests {
     void markConsumedFailureRollsBackWholeTransaction() {
         when(eventService.lockEvent("event-1"))
                 .thenReturn(eventOf(SeckillOrderEvent.STATUS_CONFIRMED));
-        when(voucherOrderMapper.selectCount(any())).thenReturn(0);
         when(seckillVoucherMapper.update(any(), any())).thenReturn(1);
         when(voucherOrderMapper.insert(any())).thenReturn(1);
         when(eventService.markConsumed(eq("event-1"))).thenReturn(false);
@@ -182,8 +192,32 @@ class VoucherOrderHandlerTests {
 
     @Test
     void orderAlreadyExistsChecksUserAndVoucher() {
-        when(voucherOrderMapper.selectCount(any())).thenReturn(1);
+        when(voucherOrderMapper.selectOne(any())).thenReturn(matchingOrder());
 
         assert handler.orderAlreadyExists(message);
+    }
+
+    @Test
+    void mismatchedMessageIdentityFailsBeforeAnyWrite() {
+        SeckillOrderEvent event = eventOf(SeckillOrderEvent.STATUS_CONFIRMED);
+        event.setVoucherId(99L);
+        when(eventService.lockEvent("event-1")).thenReturn(event);
+
+        assertThrows(SeckillConsistencyException.class,
+                () -> handler.createOrder(message));
+
+        verify(voucherOrderMapper, never()).insert(any());
+        verify(seckillVoucherMapper, never()).update(any(), any());
+        verify(eventService, never()).markConsumed(any());
+    }
+
+    @Test
+    void existingOrderWithDifferentOrderIdIsNotIdempotentSuccess() {
+        VoucherOrder conflicting = matchingOrder();
+        conflicting.setId(101L);
+        when(voucherOrderMapper.selectOne(any())).thenReturn(conflicting);
+
+        assertThrows(SeckillConsistencyException.class,
+                () -> handler.orderAlreadyExists(message));
     }
 }

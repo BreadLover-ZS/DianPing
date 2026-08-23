@@ -58,17 +58,30 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     @Override
     public Result queryHotBlog(Integer current) {
         // 根据点赞数降序分页查询
+        int pageNo = SystemConstants.normalizePage(current);
         Page<Blog> page = query()
                 .orderByDesc("liked")
-                .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
+                .page(new Page<>(pageNo, SystemConstants.MAX_PAGE_SIZE));
         // 获取当前页数据
         List<Blog> records = page.getRecords();
-        // 填充作者昵称、头像
+        if (records == null || records.isEmpty()) {
+            return Result.ok(Collections.emptyList());
+        }
+        // 批量查询作者，避免热门博客每页 N 次数据库查询。
+        List<Long> userIds = records.stream()
+                .map(Blog::getUserId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, User> users = userService.listByIds(userIds).stream()
+                .collect(Collectors.toMap(User::getId, user -> user,
+                        (first, ignored) -> first));
         records.forEach(blog -> {
-            Long userId = blog.getUserId();
-            User user = userService.getById(userId);
-            blog.setName(user.getNickName());
-            blog.setIcon(user.getIcon());
+            User user = users.get(blog.getUserId());
+            if (user != null) {
+                blog.setName(user.getNickName());
+                blog.setIcon(user.getIcon());
+            }
         });
         return Result.ok(records);
     }
@@ -177,8 +190,17 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         // 解析出用户id
         List<Long> ids = top5.stream().map(Long::valueOf).collect(Collectors.toList());
         // 查询用户信息并转为 UserDTO，避免泄露敏感信息
-        List<UserDTO> userDTOS = userService.listByIds(ids).stream()
-                .map(user -> BeanUtil.copyProperties(user, UserDTO.class))
+        Map<Long, User> users = userService.listByIds(ids).stream()
+                .collect(Collectors.toMap(User::getId, user -> user,
+                        (first, ignored) -> first));
+        List<UserDTO> userDTOS = ids.stream()
+                .map(users::get)
+                .filter(java.util.Objects::nonNull)
+                .map(user -> {
+                    UserDTO dto = BeanUtil.copyProperties(user, UserDTO.class);
+                    dto.setRole(null);
+                    return dto;
+                })
                 .collect(Collectors.toList());
         return Result.ok(userDTOS);
     }
@@ -192,9 +214,10 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
      */
     @Override
     public Result queryBlogByUserId(Long id, Integer current) {
+        int pageNo = SystemConstants.normalizePage(current);
         Page<Blog> page = query()
                 .eq("user_id", id)
-                .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
+                .page(new Page<>(pageNo, SystemConstants.MAX_PAGE_SIZE));
         return Result.ok(page.getRecords());
     }
 

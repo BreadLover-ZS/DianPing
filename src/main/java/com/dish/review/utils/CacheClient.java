@@ -8,6 +8,7 @@ import cn.hutool.json.JSONUtil;
 import com.dish.review.entity.Shop;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -21,6 +22,13 @@ import java.util.function.Function;
 public class CacheClient {
 
     private final StringRedisTemplate stringRedisTemplate;
+
+    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT =
+            new DefaultRedisScript<>(
+                    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                            + "return redis.call('del', KEYS[1]) "
+                            + "else return 0 end",
+                    Long.class);
 
     /**
      * 构造注入 StringRedisTemplate
@@ -73,6 +81,20 @@ public class CacheClient {
      * @return 查询到的对象，若数据库中不存在则返回null
      */
     public <R, ID> R queryWithPassThrough(String keyPrefix, ID id, Class<R> type, Function<ID, R> dbFallback, Long time, TimeUnit unit) {
+        return queryWithPassThrough(keyPrefix, id, type, dbFallback, time, unit,
+                RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
+    }
+
+    /** 穿透缓存允许单独配置空值 TTL，避免把正常缓存时长误用于空值。 */
+    public <R, ID> R queryWithPassThrough(
+            String keyPrefix,
+            ID id,
+            Class<R> type,
+            Function<ID, R> dbFallback,
+            Long time,
+            TimeUnit unit,
+            Long nullTime,
+            TimeUnit nullUnit) {
         String key = keyPrefix + id;
 
         //1.从Redis中查商铺缓存
@@ -97,7 +119,7 @@ public class CacheClient {
         if (r == null) {
             //6.不存在
             //将控制信息接入redis（解决缓存穿透）
-            stringRedisTemplate.opsForValue().set(key, "", time, unit);
+            stringRedisTemplate.opsForValue().set(key, "", nullTime, nullUnit);
 
             //返回错误信息
             return null;
@@ -151,10 +173,10 @@ public class CacheClient {
         //6.过期，缓存重建,然后返回旧对象
         //6.1获取互斥锁
         String lockKey = RedisConstants.LOCK_SHOP_KEY + id;
-        boolean isLocked = tryLock(lockKey);
+        String lockToken = tryLock(lockKey);
 
         //6.2判断是否获取锁
-        if (isLocked) {
+        if (lockToken != null) {
             //6.3成功，开启独立线程，实现缓存重建
             CACHE_REBUILD_EXECUTOR.submit(() -> {
                 try {
@@ -166,7 +188,7 @@ public class CacheClient {
                     throw new RuntimeException(e);
                 } finally {
                     //6.4释放锁
-                    unlock(lockKey);
+                    unlock(lockKey, lockToken);
                 }
             });
 
@@ -181,8 +203,11 @@ public class CacheClient {
      * @param key 锁的Redis键
      * @return true表示成功获取锁，false表示锁已被其他线程持有
      */
-    private boolean tryLock(String key) {
-        return BooleanUtil.isTrue(stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS));
+    private String tryLock(String key) {
+        String token = java.util.UUID.randomUUID().toString();
+        boolean locked = BooleanUtil.isTrue(stringRedisTemplate.opsForValue()
+                .setIfAbsent(key, token, 10, TimeUnit.SECONDS));
+        return locked ? token : null;
     }
 
     //释放锁
@@ -191,7 +216,10 @@ public class CacheClient {
      *
      * @param key 锁的Redis键
      */
-    private void unlock(String key) {
-        stringRedisTemplate.delete(key);
+    private void unlock(String key, String token) {
+        stringRedisTemplate.execute(
+                UNLOCK_SCRIPT,
+                java.util.Collections.singletonList(key),
+                token);
     }
 }

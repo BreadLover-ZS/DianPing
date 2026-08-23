@@ -110,7 +110,7 @@ User ──< VoucherOrder >── Voucher
 | `tb_seckill_voucher` | `voucher_id` 主键 | 一张券只对应一条秒杀库存记录。 |
 | `tb_shop` | `type_id` 索引 | 按商铺分类查询具备基础索引。 |
 | `tb_voucher_order` | 订单主键；`(user_id, voucher_id)` 联合唯一索引 | Redis 或消息链路失效时，数据库仍可最终拒绝重复订单。 |
-| `tb_seckill_order_event` | `(status, next_retry_time, lease_until)` 任务扫描索引；`row_version` CAS；租约列 | 事件表即 Outbox；状态机 10 态约束迁移，迟到回调不能覆盖终态。 |
+| `tb_seckill_order_event` | `(status, next_retry_time, lease_until)` 任务扫描索引；`row_version` 状态变更计数；租约列 | 事件表即 Outbox；状态机 10 态约束迁移，迟到回调不能覆盖终态。真正的并发栅栏由状态条件、租约和 `lease_token` 提供。 |
 | `tb_seckill_publish_attempt` | `uk(event_id, attempt_no)` | 每次实际发送一行证据，Confirm/Return/异常分开记录。 |
 | `tb_seckill_failure_case` | `idempotency_key` 唯一索引 | DLQ、回滚异常、对账冲突的持久化事实，防重复落库。 |
 
@@ -423,7 +423,7 @@ Redis 锁可能因过期、故障、实现缺陷或运维操作失效。数据�
 
 **参考答案：**
 
-当前入口已经把订单写入移到 RabbitMQ 消费者。前端请求只做校验、Redis Lua 原子预留和尽力写入 PENDING 事件，随后返回受理结果；若事件写入失败，对账任务会依据 Redis 预留账本幂等补建。消息由 Outbox 发布任务通过 CAS + 租约抢占后异步发送，请求线程不直接发布。代码与 185 个单元测试已经覆盖主要状态机和任务逻辑，但远端 RabbitMQ 连通性、消费者启用、重复投递、故障恢复和真实并发压测仍需验收，不能直接声称“支撑某个 QPS”。
+当前入口已经把订单写入移到 RabbitMQ 消费者。前端请求只做校验、Redis Lua 原子预留和尽力写入 PENDING 事件，随后返回受理结果；若事件写入失败，对账任务会依据 Redis 预留账本幂等补建。消息由 Outbox 发布任务通过 CAS + 租约抢占后异步发送，请求线程不直接发布。当前 JDK 8 下 200 个自动化测试已经覆盖主要状态机、任务逻辑和 Spring 装配，但真实 RabbitMQ 连通性、重复投递、故障恢复、数据库事务和并发压测仍需验收，不能直接声称“支撑某个 QPS”。
 
 ### 48. 当前秒杀实现还有哪些问题？
 
@@ -631,7 +631,7 @@ Redis 和数据库可能不一致，Redis 锁也可能失效。订单最终写�
 
 当前阶段可以写成：
 
-> 为秒杀链路完成可靠性闭环改造：Redis Lua 原子预扣 + 六 Key 同槽预留账本（含 orderId 反向索引 Hash）、MySQL 事件表 Outbox（CAS + 租约抢占）、发布尝试证据表与统一失败决策服务、消费异常三分类（可重试/永久/一致性）、先落失败记录再进 DLQ 的死信闭环、持久化事件级回滚任务、Redis/MySQL 双向对账（7 天回看快速扫描 + 每小时全量分页兜底，异常预留先写人工集合再移除待对账入口）与库存安全初始化、六态订单状态查询；185 个单元测试覆盖状态机、决策与任务逻辑。真实 RabbitMQ 故障演练和并发压测仍待完成。
+> 为秒杀链路完成可靠性闭环改造：Redis Lua 原子预扣 + 六 Key 同槽预留账本（含 orderId 反向索引 Hash）、MySQL 事件表 Outbox（CAS + 租约抢占）、发布尝试证据表与统一失败决策服务、消费异常三分类（可重试/永久/一致性）、先落失败记录再进 DLQ 的死信闭环、持久化事件级回滚任务、Redis/MySQL 双向对账（7 天回看快速扫描 + 每小时全量分页兜底，异常预留先写人工集合再移除待对账入口）与库存安全初始化、六态订单状态查询；JDK 8 下 200 个自动化测试覆盖状态机、决策、任务逻辑和 Spring 装配。真实 RabbitMQ、数据库事务、故障演练和并发压测仍待完成。
 
 ### 9.2 禁止夸大的说法
 

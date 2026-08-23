@@ -16,10 +16,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * 功能补全集成测试
  *
  * 启动完整 Spring 上下文，验证本次补全的各模块 Service Bean 能被正确装配，
- * 确保无循环依赖、无注入失败。依赖远程 MySQL/Redis 环境（见 application.yaml）。
+ * 确保无循环依赖、无注入失败。该测试不执行外部中间件读写，因此不能证明
+ * MySQL、Redis 或 RabbitMQ 的真实运行行为。
  *
  * <p>使用 test profile：禁用全部秒杀定时任务（Outbox、回滚、对账、库存扫描、
- * 确认超时），防止测试进程访问或修改远程业务状态。</p>
+ * 确认超时），防止测试进程主动访问或修改外部业务状态。</p>
  */
 @SpringBootTest
 @ActiveProfiles("test")

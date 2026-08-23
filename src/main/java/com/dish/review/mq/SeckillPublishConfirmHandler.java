@@ -68,7 +68,10 @@ public class SeckillPublishConfirmHandler {
                         : confirm.getReason();
 
                 // NACK：Broker 明确拒绝承担该次消息
-                attemptService.recordNack(attemptId, reason);
+                boolean nackRecorded = attemptService.recordNack(attemptId, reason);
+                if (!nackRecorded) {
+                    attemptService.recordLateConfirm(attemptId, 2, reason);
+                }
 
                 log.error(
                         "RabbitMQ 发布确认 NACK，eventId={}，attemptId={}，reason={}",
@@ -84,7 +87,11 @@ public class SeckillPublishConfirmHandler {
             boolean returned =
                     correlationData.getReturnedMessage() != null;
 
-            attemptService.recordAck(attemptId);
+            boolean ackRecorded = attemptService.recordAck(attemptId);
+            if (!ackRecorded) {
+                // 超时后才到达的 ACK 不能覆盖 UNKNOWN，只追加迟到证据。
+                attemptService.recordLateConfirm(attemptId, 1, "late_ack");
+            }
 
             if (returned) {
                 // 交换机收到消息但没有路由到队列：该次尝试明确未投递

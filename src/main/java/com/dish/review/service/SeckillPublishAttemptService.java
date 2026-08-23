@@ -96,6 +96,24 @@ public class SeckillPublishAttemptService {
         return attemptMapper.update(null, update) == 1;
     }
 
+    /** WAITING 已被超时/异常标记后，保留迟到 Confirm 证据但不改写原结论。 */
+    public boolean recordLateConfirm(
+            String attemptId,
+            int result,
+            String reason) {
+        UpdateWrapper<SeckillPublishAttempt> update = new UpdateWrapper<>();
+
+        update.set("late_confirm_result", result)
+                .set("late_confirm_reason", limitText(reason, 512))
+                .setSql("late_confirm_at = CURRENT_TIMESTAMP")
+                .eq("attempt_id", attemptId)
+                .in("confirm_status",
+                        SeckillPublishAttempt.CONFIRM_UNKNOWN,
+                        SeckillPublishAttempt.CONFIRM_NACK);
+
+        return attemptMapper.update(null, update) == 1;
+    }
+
     /**
      * Confirm NACK：Broker 明确拒绝承担该次消息。
      */

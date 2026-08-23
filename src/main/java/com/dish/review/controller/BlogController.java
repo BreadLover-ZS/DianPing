@@ -1,21 +1,16 @@
 package com.dish.review.controller;
 
 
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.dish.review.dto.Result;
 import com.dish.review.dto.UserDTO;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HtmlUtil;
 import com.dish.review.entity.Blog;
-import com.dish.review.entity.User;
 import com.dish.review.service.IBlogService;
-import com.dish.review.service.IUserService;
-import com.dish.review.utils.SystemConstants;
 import com.dish.review.utils.UserHolder;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
-import java.util.List;
 
 /**
  * <p>
@@ -31,8 +26,6 @@ public class BlogController {
 
     @Resource
     private IBlogService blogService;
-    @Resource
-    private IUserService userService;
 
     @PostMapping
     public Result saveBlog(@RequestBody Blog blog) {
@@ -60,29 +53,12 @@ public class BlogController {
         // 获取登录用户
         UserDTO user = UserHolder.getUser();
         // 根据用户查询
-        Page<Blog> page = blogService.query()
-                .eq("user_id", user.getId()).page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
-        // 获取当前页数据
-        List<Blog> records = page.getRecords();
-        return Result.ok(records);
+        return blogService.queryBlogByUserId(user.getId(), current);
     }
 
     @GetMapping("/hot")
     public Result queryHotBlog(@RequestParam(value = "current", defaultValue = "1") Integer current) {
-        // 根据用户查询
-        Page<Blog> page = blogService.query()
-                .orderByDesc("liked")
-                .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
-        // 获取当前页数据
-        List<Blog> records = page.getRecords();
-        // 查询用户
-        records.forEach(blog ->{
-            Long userId = blog.getUserId();
-            User user = userService.getById(userId);
-            blog.setName(user.getNickName());
-            blog.setIcon(user.getIcon());
-        });
-        return Result.ok(records);
+        return blogService.queryHotBlog(current);
     }
 
     /**

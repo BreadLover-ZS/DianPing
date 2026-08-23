@@ -4,7 +4,7 @@
 >
 > 交付日期：2026-08-21（当日完成三轮验收问题修复，见第 8、9、10 节）
 >
-> 文档性质：交付报告。当前状态：**代码初版完成、验收问题已全部修复并通过 185 项单元测试**；真实 RabbitMQ 故障演练、跨存储崩溃窗口演练和并发压测仍未执行，复验前不建议部署或开启消费者。
+> 文档性质：交付报告。当前状态：**代码初版完成、验收问题已全部修复并在 JDK 8 下通过 200 项自动化测试**；真实 RabbitMQ、数据库事务、跨存储崩溃窗口和并发压测仍未验收，复验前不建议部署或开启消费者。
 
 ## 1. 实施概览
 
@@ -140,16 +140,16 @@
 mvn clean compile                                    # PASS
 
 # 全量测试（第三轮验收修复后复验，2026-08-21）
-mvn clean test                                       # 185 tests, 185 passed
+./mvnw clean test                                    # 200 tests, 200 passed
 ```
 
 | 项目 | 结果 |
 | --- | --- |
 | Java 8 主源码编译 | PASS |
 | Java 8 测试源码编译 | PASS |
-| 单元测试（最终代码复验） | 185 执行 / 185 通过 / 0 失败 |
+| 自动化测试（JDK 8 最终代码复验） | 200 执行 / 200 通过 / 0 失败 / 0 错误 / 0 跳过 |
 | 测试环境隔离 | test profile 禁用全部秒杀定时任务，测试不再触碰远程 MySQL/Redis |
-| 迁移 SQL | 静态检查通过；已于 2026-08-21 获授权在远程环境（`dish_review` @ 115.29.220.133，MySQL 8.0.46）在线执行并验证 |
+| 迁移 SQL | 静态检查通过；已于 2026-08-21 获授权在受管远程环境（`dish_review`，MySQL 8.0.46）在线执行并验证 |
 
 > 说明：第一轮验收时 `SecurityFixTests.testPathTraversalDetection` 因 Windows `..\` 分隔符在 macOS 不被识别而失败；本轮已在 `UploadController` 中统一归一化反斜杠后修复，现为 10/10 通过。
 
@@ -166,7 +166,7 @@ mvn clean test                                       # 185 tests, 185 passed
 ## 6. 需要人工执行的 SQL 与环境配置
 
 ```bash
-# 1. 执行迁移 —— ✅ 已于 2026-08-21 在远程环境（115.29.220.133/dish_review）执行并验证：
+# 1. 执行迁移 —— ✅ 已于 2026-08-21 在受管远程环境（`dish_review`）执行并验证：
 #    - 迁移前已备份：tb_seckill_order_event → tb_seckill_order_event_bak_20260821（0 行）
 #    - 事件表新增 9 列 + 组合索引 idx_seckill_order_event_task 已确认
 #    - 三张新表 tb_seckill_publish_attempt / tb_seckill_failure_case / tb_seckill_failure_audit 已确认
@@ -183,7 +183,7 @@ export SECKILL_RABBIT_CONSUMER_ENABLED=true
 
 ## 7. 结论
 
-规格阶段 1-7 的代码实现、单元测试和文档同步完成；三轮可靠性验收共 13 项关键问题（第一轮 6 项见第 8 节，第二轮 4 个 P1 见第 9 节，第三轮 3 个 P1 见第 10 节）及最终 Lua 移交顺序问题已全部修复，185 个单元测试全部通过。按规格第 20 节纪律，在真实故障验收完成前，不得宣称"不丢消息""高并发零超卖"或"生产可用"。
+规格阶段 1-7 的代码实现、自动化测试和文档同步完成；三轮可靠性验收共 13 项关键问题（第一轮 6 项见第 8 节，第二轮 4 个 P1 见第 9 节，第三轮 3 个 P1 见第 10 节）及最终 Lua 移交顺序问题已全部修复，JDK 8 下 200 个测试全部通过。按规格第 20 节纪律，在真实故障验收完成前，不得宣称"不丢消息""高并发零超卖"或"生产可用"。
 
 面试/简历准确表述：
 
@@ -197,7 +197,7 @@ export SECKILL_RABBIT_CONSUMER_ENABLED=true
 
 - 新增 `src/test/resources/application-test.yaml`：`dish-review.seckill.tasks-enabled=false`。
 - 所有加载完整 Spring 上下文的测试类标注 `@ActiveProfiles("test")`，Outbox 发布、确认超时、持久化回滚、双向对账、库存扫描任务在测试中全部关闭，`mvn test` 不再访问或修改远程 MySQL/Redis 业务状态。
-- 主配置 `application.yaml` 保持 `matchIfMissing=true`，生产默认开启不变。
+- 主配置和各定时任务均使用 `matchIfMissing=false`，任务及消费者默认关闭，必须显式开启。
 
 ### 8.2 发布次数与终局决策窗口（P1）
 
@@ -316,4 +316,4 @@ export SECKILL_RABBIT_CONSUMER_ENABLED=true
 
 - 问题：旧脚本先 `ZREM` 待对账入口，再 `ZADD` 人工集合。Redis Lua 只保证脚本执行期间不被其他命令穿插，不会回滚运行时错误前已经完成的写操作；若人工集合发生 `WRONGTYPE` 等错误，待对账入口已经被删除。
 - 修复：先 `ZSCORE` 确认源成员存在，再 `ZADD` 人工集合，最后 `ZREM` 待对账入口。目标写入失败时源入口仍保留；源 Key 类型也已在删除前验证。
-- 测试：新增 `SeckillReservationManualLuaTests`，锁定 `ZSCORE → ZADD → ZREM` 的安全顺序；最终 Java 8 `mvn clean test` 为 185 执行、185 通过、0 失败、0 跳过。
+- 测试：新增 `SeckillReservationManualLuaTests`，锁定 `ZSCORE → ZADD → ZREM` 的安全顺序；2026-08-21 当时 Java 8 `mvn clean test` 为 185 执行、185 通过、0 失败、0 跳过，当前全量已增至 200 项并通过。

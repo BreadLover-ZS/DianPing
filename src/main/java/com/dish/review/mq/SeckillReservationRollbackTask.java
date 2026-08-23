@@ -30,7 +30,7 @@ import java.util.UUID;
 @ConditionalOnProperty(
         name = "dish-review.seckill.tasks-enabled",
         havingValue = "true",
-        matchIfMissing = true
+        matchIfMissing = false
 )
 public class SeckillReservationRollbackTask {
 

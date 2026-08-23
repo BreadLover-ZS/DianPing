@@ -13,6 +13,8 @@ import com.dish.review.mapper.VoucherOrderMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Objects;
+
 /**
  * 秒杀订单消费事务处理器（规格第 10 节）。
  *
@@ -52,6 +54,8 @@ public class VoucherOrderHandler {
                             + message.getEventId()
             );
         }
+
+        validateMessageMatchesEvent(message, event);
 
         int status = event.getStatus();
 
@@ -97,11 +101,10 @@ public class VoucherOrderHandler {
         }
 
         // 6. 查询已有订单；存在则标记 CONSUMED（重投幂等）
-        Integer count = voucherOrderMapper.selectCount(
-                orderByUserAndVoucher(message)
-        );
+        VoucherOrder existingOrder = findExistingOrder(message);
 
-        if (count != null && count > 0) {
+        if (existingOrder != null) {
+            validateExistingOrderIdentity(existingOrder, message);
             markEventConsumed(message);
             return;
         }
@@ -168,15 +171,50 @@ public class VoucherOrderHandler {
         return queryWrapper;
     }
 
+    private VoucherOrder findExistingOrder(SeckillOrderMessage message) {
+        return voucherOrderMapper.selectOne(orderByUserAndVoucher(message));
+    }
+
     /**
      * 判断业务订单是否已存在，用于把重复键异常识别为幂等成功。
      */
     public boolean orderAlreadyExists(SeckillOrderMessage message) {
-        Integer count = voucherOrderMapper.selectCount(
-                orderByUserAndVoucher(message)
-        );
+        VoucherOrder existingOrder = findExistingOrder(message);
+        if (existingOrder == null) {
+            return false;
+        }
+        validateExistingOrderIdentity(existingOrder, message);
+        return true;
+    }
 
-        return count != null && count > 0;
+    /** 消息只允许处理与事件账本完全一致的业务字段，防止 eventId 复用或串单。 */
+    private void validateMessageMatchesEvent(
+            SeckillOrderMessage message,
+            SeckillOrderEvent event) {
+        if (!Objects.equals(message.getEventId(), event.getEventId())
+                || !Objects.equals(message.getOrderId(), event.getOrderId())
+                || !Objects.equals(message.getUserId(), event.getUserId())
+                || !Objects.equals(message.getVoucherId(), event.getVoucherId())
+                || !Objects.equals(message.getCreatedAt(), event.getCreatedAt())
+                || !Objects.equals(message.getVersion(), event.getMessageVersion())) {
+            throw new SeckillConsistencyException(
+                    "秒杀消息与事件账本不一致，eventId=" + message.getEventId()
+            );
+        }
+    }
+
+    /** 重复订单只有在 orderId、userId、voucherId 全部一致时才可视为幂等成功。 */
+    private void validateExistingOrderIdentity(
+            VoucherOrder existingOrder,
+            SeckillOrderMessage message) {
+        if (!Objects.equals(existingOrder.getId(), message.getOrderId())
+                || !Objects.equals(existingOrder.getUserId(), message.getUserId())
+                || !Objects.equals(existingOrder.getVoucherId(), message.getVoucherId())) {
+            throw new SeckillConsistencyException(
+                    "已存在订单与当前秒杀消息不一致，禁止按重复消息确认，eventId="
+                            + message.getEventId()
+            );
+        }
     }
 
     /**

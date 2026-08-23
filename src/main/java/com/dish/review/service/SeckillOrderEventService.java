@@ -340,6 +340,8 @@ public class SeckillOrderEventService {
                 .in("status",
                         SeckillOrderEvent.STATUS_PENDING,
                         SeckillOrderEvent.STATUS_PUBLISH_UNKNOWN)
+                .apply("next_retry_time IS NOT NULL "
+                        + "AND next_retry_time <= CURRENT_TIMESTAMP")
                 .apply("(lease_until IS NULL OR lease_until <= CURRENT_TIMESTAMP)");
 
         if (eventMapper.update(null, update) != 1) {
@@ -353,6 +355,11 @@ public class SeckillOrderEventService {
         }
 
         return claimed.getLeaseToken();
+    }
+
+    /** 租约成功后重新读取事件，避免任务继续使用扫描阶段的旧快照。 */
+    public SeckillOrderEvent findById(String eventId) {
+        return eventMapper.selectById(eventId);
     }
 
     /**

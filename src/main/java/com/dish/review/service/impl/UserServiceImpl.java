@@ -19,6 +19,7 @@ import com.dish.review.utils.SystemConstants;
 import com.dish.review.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.connection.BitFieldSubCommands;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -27,6 +28,7 @@ import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +58,26 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     private static final int MAX_LOGIN_ATTEMPTS = 5;
 
     /**
+     * 在 Redis 内原子完成验证码读取、错误次数递增和成功后的删除。
+     * 返回值：1=成功，0=验证码错误，-1=超过次数，-2=验证码不存在或已过期。
+     */
+    private static final DefaultRedisScript<Long> VERIFY_CODE_SCRIPT =
+            new DefaultRedisScript<>(
+                    "local code = redis.call('get', KEYS[1]) "
+                            + "if not code then return -2 end "
+                            + "local attempts = tonumber(redis.call('get', KEYS[2]) or '0') "
+                            + "if attempts >= tonumber(ARGV[2]) then "
+                            + "redis.call('del', KEYS[1]); redis.call('del', KEYS[2]); return -1 end "
+                            + "if code == ARGV[1] then "
+                            + "redis.call('del', KEYS[1]); redis.call('del', KEYS[2]); return 1 end "
+                            + "attempts = redis.call('incr', KEYS[2]) "
+                            + "if attempts == 1 then redis.call('expire', KEYS[2], ARGV[3]) end "
+                            + "if attempts >= tonumber(ARGV[2]) then redis.call('del', KEYS[1]) end "
+                            + "return 0",
+                    Long.class
+            );
+
+    /**
      * 验证码发送模式（读取配置 dish-review.sms-code-mode）
      * test: 测试模式，接口直接返回验证码明文，便于本地联调
      * prod: 生产模式，接入真实短信通道发送
@@ -78,6 +100,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.fail("手机号格式无效");
         }
 
+        if ("prod".equalsIgnoreCase(smsCodeMode)) {
+            // 当前仓库没有真实短信适配器，生产模式必须 fail-closed，不能留下可登录验证码。
+            log.error("生产短信通道未配置，拒绝伪造验证码发送结果");
+            return Result.fail("短信服务暂不可用");
+        }
+
         // 2. 频率限制：60秒内同一手机号只能发送一次验证码
         String sendLimitKey = "login:code:limit:" + phone;
         Boolean canSend = stringRedisTemplate.opsForValue()
@@ -94,12 +122,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
                 RedisConstants.LOGIN_CODE_KEY + phone, code,
                 RedisConstants.LOGIN_CODE_TTL, TimeUnit.MINUTES);
 
-        // 5. 发送验证码
-        if ("prod".equalsIgnoreCase(smsCodeMode)) {
-            log.info("已向手机号 {} 发送验证码", phone);
-            return Result.ok();
-        }
-        log.info("[测试模式] 手机号 {} 的验证码为 {}", phone, code);
+        // 5. 测试模式直接返回验证码，生产模式由真实短信适配器替换此分支。
+        log.info("[测试模式] 验证码已生成，phone={}", maskPhone(phone));
         return Result.ok(code);
     }
 
@@ -150,6 +174,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.fail("手机号或密码错误");
         }
 
+        // 兼容旧的 salt@MD5 密码：成功登录后升级为 BCrypt，避免长期保留弱哈希。
+        if (PasswordEncoder.needsUpgrade(user.getPassword())) {
+            user.setPassword(PasswordEncoder.encode(loginForm.getPassword()));
+            updateById(user);
+        }
+
         // 4. 保存用户信息到 Redis 并返回 token
         return saveUserToRedis(user);
     }
@@ -163,29 +193,25 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
      * @return 登录结果
      */
     private Result loginByCode(LoginFormDTO loginForm, String phone) {
-        // 1. 校验尝试次数，防止暴力破解
+        String codeKey = RedisConstants.LOGIN_CODE_KEY + phone;
         String attemptKey = "login:code:attempt:" + phone;
-        String attemptsStr = stringRedisTemplate.opsForValue().get(attemptKey);
-        int attempts = attemptsStr == null ? 0 : Integer.parseInt(attemptsStr);
-        if (attempts >= MAX_LOGIN_ATTEMPTS) {
-            // 超过最大尝试次数，删除验证码，要求重新获取
-            stringRedisTemplate.delete(RedisConstants.LOGIN_CODE_KEY + phone);
-            stringRedisTemplate.delete(attemptKey);
+        Long verifyResult = stringRedisTemplate.execute(
+                VERIFY_CODE_SCRIPT,
+                Arrays.asList(codeKey, attemptKey),
+                loginForm.getCode() == null ? "" : loginForm.getCode(),
+                String.valueOf(MAX_LOGIN_ATTEMPTS),
+                String.valueOf(RedisConstants.LOGIN_CODE_TTL * 60L)
+        );
+
+        if (verifyResult == null || verifyResult == -2L) {
+            return Result.fail("验证码错误或已过期");
+        }
+        if (verifyResult == -1L) {
             return Result.fail("验证码错误次数过多，请重新获取验证码");
         }
-
-        // 2. 从 Redis 获取验证码并校验
-        Object cacheCode = stringRedisTemplate.opsForValue().get(RedisConstants.LOGIN_CODE_KEY + phone);
-        if (cacheCode == null || !cacheCode.equals(loginForm.getCode())) {
-            // 验证码不一致，增加尝试次数计数
-            stringRedisTemplate.opsForValue().set(attemptKey, String.valueOf(attempts + 1),
-                    RedisConstants.LOGIN_CODE_TTL, TimeUnit.MINUTES);
+        if (verifyResult != 1L) {
             return Result.fail("验证码错误");
         }
-
-        // 3. 验证码一致，清除尝试计数
-        stringRedisTemplate.delete(attemptKey);
-        stringRedisTemplate.delete(RedisConstants.LOGIN_CODE_KEY + phone);
 
         // 4. 根据手机号查询用户
         User user = query().eq("phone", phone).one();
@@ -265,10 +291,19 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     private User createUserWithPhone(String phone) {
         User user = new User();
         user.setPhone(phone);
-        user.setNickName(SystemConstants.USER_NICK_NAME_PREFIX + phone);
+        user.setNickName(SystemConstants.USER_NICK_NAME_PREFIX + RandomUtil.randomString(8));
+        user.setRole(SystemConstants.ROLE_USER);
         // 保存用户到数据库
         save(user);
         return user;
+    }
+
+    /** 脱敏手机号，避免测试日志和生产日志泄露完整手机号。 */
+    private String maskPhone(String phone) {
+        if (StrUtil.isBlank(phone) || phone.length() < 7) {
+            return "***";
+        }
+        return phone.substring(0, 3) + "****" + phone.substring(phone.length() - 4);
     }
 
     /**
