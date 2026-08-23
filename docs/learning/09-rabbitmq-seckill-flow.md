@@ -1,976 +1,821 @@
-# RabbitMQ 秒杀链路：从消息流到可靠性面试
+# RabbitMQ 秒杀源码阅读手册：机制、调用链与必读模块
 
-> 目标：理解 RabbitMQ 的消息生命周期，并能用本项目解释可靠发布、重复消费、失败重试、DLQ、回滚和最终一致性。
+> 目标：不是把 MQ 代码全部背下来，而是能沿着一次秒杀请求，读懂消息为什么会被发送、如何确认、何时重试、何时回滚，以及并发任务怎样避免互相破坏。
 >
-> 版本边界：项目使用 Java 8、Spring Boot 2.3.12 和 Spring AMQP 2.2.x。本文先解释通用原理，再说明当前源码；新版 API 或 RabbitMQ 4.x 能力不会写成项目已有能力。
+> 本文只描述当前项目已经实现的机制。通用 RabbitMQ 理论只在解释源码时出现。
 
-## 0. 阅读方法
+---
 
-本文使用五种标记：
+## 1. 先建立全局认识
 
-- **【必会】**：面试必须能独立回答。
-- **【项目】**：当前代码已经实现。
-- **【深入】**：用于应对连续追问。
-- **【边界】**：代码、单测或真实环境尚未验证。
-- **【自测】**：先回答，再看紧随其后的结论。
+### 1.1 这套 MQ 代码真正解决的是什么
 
-建议按三遍阅读：
+秒杀请求先在 Redis 中扣减库存，订单最后落到 MySQL。两者之间没有一个能同时覆盖 Redis、MySQL 和 RabbitMQ 的本地事务，因此会出现这些窗口：
 
-1. 第一遍只读第 1～3 章，讲清正常消息流。
-2. 第二遍读第 4～10 章，理解每个故障窗口如何收敛。
-3. 第三遍读第 11～16 章，用故障推演和面试题检查理解。
+- Redis 已扣库存，MySQL 事件还没保存；
+- 事件已保存，消息还没发送；
+- 消息可能已到 Broker，但发送方没收到 Confirm；
+- 消息已被消费，但消费结果或事件状态没及时收敛；
+- 确认所有发送都失败后，需要把 Redis 预占退回；
+- 多实例定时任务可能同时处理同一事件；
+- 进程可能在任意两行代码之间崩溃。
 
-### 0.1 一张图看懂项目
+项目没有假装这些窗口不存在，而是用以下机制逐步收敛：
 
-```text
-HTTP 请求
-  │
-  ├─ 生成 eventId / orderId
-  ├─ Redis Lua：扣可售库存 + 一人一单 + 写预留账本
-  ├─ MySQL：尽力写 PENDING 事件
-  └─ 返回“已受理”，请求线程不直接发 MQ
-                         │
-                         ▼
-              Outbox 定时任务 CAS + 租约抢占
-                         │
-              创建 publish_attempt 证据
-                         │
-                         ▼
-Producer ──routing key──> DirectExchange ──binding──> Main Queue
-   ▲                                                    │
-   │ Confirm / Return                                   ▼
-   └────────────────────────────────────────────── Consumer
-                                                        │
-                                  MySQL 事务：锁事件行
-                                  → 条件扣库存
-                                  → 写订单
-                                  → 标记 CONSUMED
-                                                        │
-                                                        ▼
-                                          方法成功返回后由容器 ACK
+| 机制 | 主要作用 | 解决的问题 |
+|---|---|---|
+| Redis 预占记录 | 保存这次扣库存对应的事件 | MySQL 事件写入失败后仍可对账重建 |
+| 本地事件表（Outbox） | 把“应该发消息”持久化为待办 | 应用崩溃后仍能继续发送 |
+| 发送尝试表 | 保存每次发送的独立证据 | 不能用“最后一次失败”覆盖早先可能成功的发送 |
+| Confirm / Return / 超时回调 | 收集 Broker 接收、路由和未知结果 | 区分 ACK、NACK、退回、结果未知 |
+| 决策器 | 汇总订单、事件和全部发送证据 | 决定等待、重试、回滚、标记消费或人工处理 |
+| 租约 + token | 多实例抢占任务并隔离过期执行者 | 避免重复并发处理和旧任务释放新租约 |
+| 消费事务 + 幂等 | 同一事务扣 MySQL 库存、建单、更新事件 | 重复消息不重复建单，业务数据保持一致 |
+| 回滚状态机 | 安全退回 Redis 预占 | 防止回滚与迟到消费者同时成功 |
+| 双向对账 | 扫描 Redis 与 MySQL 的残留差异 | 修复异步链路长期未收敛的问题 |
 
-失败分支：有限重试 → 先写 MySQL 失败记录 → Reject(requeue=false)
-                                                │
-                                                ▼
-                                      DLX → Dead Letter Queue
-
-收敛分支：确认超时扫描 / 发布补偿 / 持久化回滚 / Redis-MySQL 对账 / 人工审核
-```
-
-### 0.2 一分钟面试回答
-
-项目把秒杀入口拆成“快速受理”和“异步落单”。请求先生成业务 ID，通过 Redis Lua 原子校验库存与一人一单，同时写预留账本；随后尽力写 MySQL PENDING 事件并返回受理。事件表作为 Outbox，定时任务通过 CAS 和租约抢占事件，记录独立发布尝试后发送持久化 RabbitMQ 消息。生产端用 Confirm、Return 和超时扫描保存发送证据，但结果未知时禁止直接回滚。消费端在同一数据库事务中锁定事件、条件扣库存、写订单并标记 CONSUMED，事务成功后才由 Spring 容器 ACK；重复投递由事件状态、订单查询和数据库唯一索引兜底。重试耗尽时先持久化失败记录，再拒绝消息进入 DLQ。Redis 预留、Outbox、回滚任务和双向对账分别处理跨 Redis、RabbitMQ、MySQL 的崩溃窗口。
-
-不能补上一句“因此绝不丢消息”。真实 RabbitMQ 故障注入、跨存储崩溃演练和并发压测尚未完成。
-
-## 1. MQ 解决什么，又带来什么
-
-### 1.1 不使用 MQ
-
-如果 HTTP 请求同步完成所有工作，请求线程需要依次访问 Redis、MySQL，并等待订单写入：
+### 1.2 一条主调用链
 
 ```text
-请求 → 校验 → Redis 扣库存 → MySQL 扣库存 → 写订单 → 返回
+HTTP 秒杀请求
+  -> VoucherOrderServiceImpl.seckillVoucher()
+     -> SeckillVoucherLuaExecutor.reserve()       Redis 原子预占
+     -> SeckillOrderEventService.createPending()  创建本地事件
+     -> 立即返回“已受理”
+
+定时发送任务
+  -> SeckillOrderPublishRetryTask.publishDueEvents()
+     -> claimLease()                              抢占事件租约
+     -> SeckillPublishAttemptService.createNextAttempt()
+     -> SeckillOrderPublisher.send()              唯一实际发送入口
+        -> RabbitTemplate.convertAndSend()
+
+发送结果
+  -> SeckillPublishConfirmHandler                 Confirm
+  -> RabbitMqPublisherCallback                    Return
+  -> SeckillPublishConfirmTimeoutTask             长时间无结果
+  -> SeckillOrderFailureDecisionService           汇总证据并决策
+
+消费
+  -> SeckillOrderConsumer.consume()
+     -> VoucherOrderHandler.createOrder()
+        -> 锁事件、检查状态、扣 MySQL 库存、写订单、标记 CONSUMED
+
+失败收敛
+  -> SeckillReservationRollbackTask               确认失败后回滚 Redis
+  -> SeckillOrderReconciliationTask               Redis/MySQL 双向对账
+  -> DLQ + failure case                           保存失败证据和人工处理入口
 ```
 
-问题不是“同步一定错误”，而是秒杀峰值直接传给数据库：
+### 1.3 三个 ID 必须分清
 
-- 请求耗时受最慢依赖控制。
-- 数据库瞬时并发和库存行竞争增大。
-- 任一依赖抖动都会占住请求线程。
-- 扩展通知、积分等后续动作会继续拉长链路。
+| ID | 粒度 | 用途 |
+|---|---|---|
+| `eventId` | 一次秒杀业务事件 | 串起 Redis 预占、事件表、消息和最终处理结果 |
+| `attemptId` | 一次 MQ 发送动作 | 串起该次发送的 Confirm、Return、超时证据 |
+| `orderId` | 订单 | 业务幂等键之一，也是最终成功结果 |
 
-### 1.2 引入 MQ
+同一个 `eventId` 可以对应多个 `attemptId`。这是理解决策器的关键：重试不是修改原发送记录，而是创建新的一次发送尝试。
 
-项目在 Redis 预留成功后先返回受理，订单写入由消费者异步完成：
+---
 
-- **异步**：用户不等待 MySQL 订单事务完成。
-- **削峰**：Queue 暂存生产速度超过消费速度的消息。
-- **解耦**：请求入口不直接调用订单事务处理器。
+## 2. 源码阅读分级
 
-代价同样明确：
+### P0：必须精读
 
-- 用户拿到的是“已受理”，不是“订单已成功”。
-- 消息可能重复、延迟、积压或结果未知。
-- Redis、RabbitMQ、MySQL 之间没有一个本地事务。
-- 系统必须补充状态查询、幂等、重试、回滚、对账和监控。
+按下面顺序读，先不要从配置类开始：
 
-**【必会】MQ 不是一致性解决方案。** 它提供异步传输和缓冲能力，一致性仍由业务协议完成。
+1. [`VoucherOrderServiceImpl`](../../src/main/java/com/dish/review/service/impl/VoucherOrderServiceImpl.java)：请求入口、Redis 预占、事件落库和未知结果边界。
+2. [`SeckillOrderPublishRetryTask`](../../src/main/java/com/dish/review/mq/SeckillOrderPublishRetryTask.java)：谁负责挑选事件并触发发送。
+3. [`SeckillOrderEventService`](../../src/main/java/com/dish/review/service/SeckillOrderEventService.java)：先理解扫描、基于状态的条件更新、租约和 token，后续才能看懂谁有权发送或改状态。
+4. [`SeckillOrderEventStateMachine`](../../src/main/java/com/dish/review/service/SeckillOrderEventStateMachine.java)：允许哪些状态转换。
+5. [`SeckillOrderPublisher`](../../src/main/java/com/dish/review/mq/SeckillOrderPublisher.java)：唯一实际调用 `RabbitTemplate` 的模块。
+6. [`SeckillPublishConfirmHandler`](../../src/main/java/com/dish/review/mq/SeckillPublishConfirmHandler.java)：Confirm 如何落证据。
+7. [`SeckillOrderFailureDecisionService`](../../src/main/java/com/dish/review/service/SeckillOrderFailureDecisionService.java)：何时等、重试、回滚或人工处理。
+8. [`SeckillOrderConsumer`](../../src/main/java/com/dish/review/mq/SeckillOrderConsumer.java) 与 [`VoucherOrderHandler`](../../src/main/java/com/dish/review/service/VoucherOrderHandler.java)：消费事务和幂等。
 
-### 1.3 Redis Lua 和 RabbitMQ 为什么不能互相替代
+### P1：带着问题读关键方法
 
-Redis Lua 解决入口原子性：库存检查、扣减、一人一单和预留账本写入要么一起成功，要么一起失败。
+- [`SeckillPublishAttemptService`](../../src/main/java/com/dish/review/service/SeckillPublishAttemptService.java)：一次发送尝试如何创建和更新。
+- [`RabbitMqPublisherCallback`](../../src/main/java/com/dish/review/mq/RabbitMqPublisherCallback.java)：Return 如何记录。
+- [`SeckillPublishConfirmTimeoutTask`](../../src/main/java/com/dish/review/mq/SeckillPublishConfirmTimeoutTask.java)：回调丢失时如何转为 UNKNOWN。
+- [`SeckillReservationRollbackTask`](../../src/main/java/com/dish/review/mq/SeckillReservationRollbackTask.java)：Redis 预占怎样安全回滚。
+- [`SeckillOrderReconciliationTask`](../../src/main/java/com/dish/review/mq/SeckillOrderReconciliationTask.java)：残留不一致怎样被发现和修复。
+- [`RabbitMqConfig`](../../src/main/java/com/dish/review/config/RabbitMqConfig.java)：队列、重试、异常分类和死信配置。
+- [`SeckillRabbitListenerErrorHandler`](../../src/main/java/com/dish/review/mq/SeckillRabbitListenerErrorHandler.java) 与 [`SeckillOrderDeadLetterConsumer`](../../src/main/java/com/dish/review/mq/SeckillOrderDeadLetterConsumer.java)：消费失败证据。
 
-RabbitMQ 解决异步传输：把已经受理的订单意图交给消费者处理，并在短时消费故障时保留消息。
+### P2：知道职责即可
 
-Lua 不负责可靠地把事件送到消费者；RabbitMQ 也不能原子地修改 Redis 库存。
+实体、Mapper、常量、管理接口、失败工单的增删改查不需要逐行读。第 14 节给出一行职责表。
 
-## 2. RabbitMQ 最小模型
+---
 
-### 2.1 七个对象
+## 3. 请求入口：先预占，再记录“待发送事件”
 
-| 对象 | 职责 | 当前项目 |
-| --- | --- | --- |
-| Producer | 发布消息 | `SeckillOrderPublisher` |
-| Broker | RabbitMQ 服务节点 | 由连接配置指向的 RabbitMQ |
-| Exchange | 根据规则路由消息，本身不是业务消息仓库 | `dianping.seckill.direct` |
-| Routing Key | 发布者附带的路由字符串 | `seckill.order.create` |
-| Binding | Exchange 到 Queue 的路由关系 | 主交换机与主队列的精确绑定 |
-| Queue | 保存等待投递的消息 | `dianping.seckill.order.queue` |
-| Consumer | 接收并处理消息 | `SeckillOrderConsumer` |
+必读：`VoucherOrderServiceImpl.seckillVoucher()`。
 
-消息不是“生产者直接塞进某个消费者”。生产者把消息发布到 Exchange；Exchange 根据 Binding 和 Routing Key 决定进入哪个 Queue；Broker 再把 Queue 中的消息投递给 Consumer。
-
-### 2.2 为什么使用 DirectExchange
-
-当前只有“创建秒杀订单”这一类明确事件，Routing Key 固定为 `seckill.order.create`。DirectExchange 按完全匹配路由，语义最直接。
-
-| 类型 | 路由方式 | 典型用途 |
-| --- | --- | --- |
-| Direct | Routing Key 完全匹配 | 明确命令或单类业务事件 |
-| Fanout | 忽略 Routing Key，广播给全部绑定队列 | 同一事件通知多个独立系统 |
-| Topic | 使用 `*`、`#` 匹配分段 Key | 多类、分层事件订阅 |
-| Headers | 根据 Header 条件匹配 | 少见，适合不便用字符串路由的场景 |
-
-选择 Exchange 不是性能背诵题，先看业务路由关系。当前没有广播和通配订阅需求，Direct 足够。
-
-### 2.3 Connection、Channel 和线程
-
-- Connection 是应用到 Broker 的 TCP 连接，建立成本较高。
-- Channel 是复用 Connection 的 AMQP 虚拟会话，发布、消费和 ACK 都在 Channel 上进行。
-- Delivery Tag 只在接收它的 Channel 内有效，不能拿到另一个 Channel 上 ACK。
-
-Spring 的 `CachingConnectionFactory` 负责连接和 Channel 缓存。业务代码通常使用 `RabbitTemplate` 和监听容器，不手工为每条消息创建 TCP 连接。
-
-**【深入】Channel 不是“业务线程池”。** 它是协议会话；并发消费线程、数据库连接池和 Channel 数量是相关但不同的资源。
-
-### 2.4 当前拓扑
+### 3.1 实际流程
 
 ```text
-dianping.seckill.direct
-  └─ seckill.order.create
-       └─ dianping.seckill.order.queue
-            ├─ Consumer
-            └─ reject/nack, requeue=false
-                 └─ dianping.seckill.dlx
-                      └─ seckill.order.dead
-                           └─ dianping.seckill.order.dlq
+校验用户与优惠券
+  -> 预先生成 eventId、orderId
+  -> Redis Lua 原子判断库存/重复下单并预占
+  -> 构造 SeckillOrderMessage
+  -> MySQL 插入 PENDING 事件
+  -> 返回 orderId、voucherId，表示请求已受理
 ```
 
-主交换机、主队列、DLX 和 DLQ 都声明为 durable。主队列通过 `x-dead-letter-exchange` 和 `x-dead-letter-routing-key` 指向死信拓扑。
+这里没有直接发送 MQ。请求线程只负责拿到 Redis 资格，并把后续工作写成可恢复的 MySQL 待办。
 
-## 3. 正常消息流
+### 3.2 Redis 五个预占账本 Key
 
-### 3.1 请求受理
+`seckill.lua` 不只是扣一个库存数字。预占成功时，它会同时维护一组可以发现、定位、重建和回滚事件的账本。
 
-入口是 `VoucherOrderServiceImpl.seckillVoucher()`：
+| Key（均拼接 `{voucherId}`） | 类型与内容 | 主要用途 |
+|---|---|---|
+| `seckill:reservation:{voucherId}` | Hash：`eventId -> orderId\|userId\|createdAt\|messageVersion` | 预留详情；MySQL 事件缺失时，对账任务靠它重建完整消息 |
+| `seckill:reservation:user:{voucherId}` | Hash：`userId -> eventId` | 标识用户当前属于哪个预留；回滚/完成脚本用它校验事件归属，防止删错预留 |
+| `seckill:reservation:pending:{voucherId}` | ZSet：`eventId -> reservedAt` | 自动对账的发现入口；按时间分数找出长期未收敛的预留 |
+| `seckill:reservation:order:{voucherId}` | Hash：`orderId -> eventId` | 订单状态查询的反向索引，不必遍历券或预留 |
+| `seckill:reservation:manual:{voucherId}` | ZSet：`eventId -> transferredAt` | 信息损坏的预留移出自动队列后，保留人工处理入口 |
 
-1. 校验登录、券信息和活动时间。
-2. 在 Lua 执行前生成 `eventId` 和 `orderId`。
-3. 执行 Redis Lua。
-4. Lua 成功后尽力创建 MySQL PENDING 事件。
-5. 即使事件写入抛技术异常，也保留 Redis 预留，由对账任务补建事件。
-6. 返回 `orderId + voucherId`，供前端查询最终状态。
+要分清三种职责：
 
-这里的返回值表示“系统已接受预留”，不是 MySQL 订单已经存在。
+- `pending` ZSet 只负责**发现候选事件**，不是业务真相；
+- 预留详情 Hash 提供**重建事件所需的数据**；
+- 用户事件映射提供回滚/完成时的**归属校验**。映射不存在表示已经收敛，映射指向其他事件则返回冲突，禁止加回库存或删除别人的预留。
 
-### 3.2 Redis 六 Key 预留账本
+因此不能笼统地说“某一个 Key 是回滚和对账的唯一凭据”。当前源码是多个索引各司其职，以 `eventId` 串联。
 
-Lua 同时操作六个带 `{voucherId}` Hash Tag 的 Key：
+正常预占 Lua 实际接收六个 Key：除了上表前四个账本 Key，还包括 `seckill:stock:{voucherId}` 库存和 `seckill:order:{voucherId}` 已下单用户集合；`manual` ZSet 只在异常预留移交人工时使用。
 
-| Key | 作用 |
-| --- | --- |
-| 库存 String | Redis 可售库存 |
-| 用户 Set | 快速拦截一人一单 |
-| 预留详情 Hash | `eventId → orderId/userId/时间/版本` |
-| 用户事件 Hash | `userId → eventId` |
-| 待对账 ZSet | 按预留时间扫描孤儿预留 |
-| 订单反向索引 Hash | `orderId → eventId`，支持状态查询 |
+所有相关 Key 都带相同的 `{voucherId}` Hash Tag。Redis Cluster 只对 `{}` 内的内容计算槽位，所以同一张券的 Key 落在同一槽中，Lua 才不会因为跨槽触发 `CROSSSLOT`，并能原子地完成扣库存、写一人一单和写预占账本。
 
-六个 Key 同槽是 Redis Cluster 下执行多 Key Lua 的前提。预留账本的关键价值是：Redis 成功而 MySQL 事件失败时，系统仍有足够信息恢复事件。
+### 3.3 Outbox 在本项目里是什么意思
 
-### 3.3 Outbox 发布
+Outbox 不是 RabbitMQ 的某个组件，而是一种本地消息表模式。本项目中的 `seckill_order_event` 就承担 Outbox 角色：
 
-`SeckillOrderPublishRetryTask` 是唯一生产者入口：
+> 业务线程不要求“现在必须把消息发成功”，只要求把“这个事件以后必须被处理”可靠地写进 MySQL；后台任务再扫描并发送。
 
-1. 扫描 `next_retry_time` 已到期的可发布事件。
-2. 使用 CAS、租约持有者和 fencing token 抢占事件。
-3. 在数据库事务中创建 `tb_seckill_publish_attempt` 记录。
-4. 组装 `SeckillOrderMessage`。
-5. 调用一次 `convertAndSend()`。
-6. 释放租约；进程崩溃则等待租约过期后由其他实例接手。
+因此：
 
-请求线程不直接发消息，避免“HTTP 线程发送一半崩溃后，没有持久化任务可追踪”的窗口。
+- `createPending()` 成功：事件进入可扫描状态，后台会发送；
+- 应用在返回后崩溃：事件仍在 MySQL，重启后可继续；
+- RabbitMQ 暂时不可用：请求线程不进行长时间重试；
+- MQ 恢复后：发送任务继续处理到期事件。
 
-### 3.4 消息内容
+### 3.4 为什么先生成 `eventId`
+
+Redis 预占时就写入 `eventId`，之后 MySQL 事件和 MQ 消息也使用它。即使 Redis 已扣库存、`createPending()` 却失败，对账任务仍能从 Redis 预占信息重建事件，而不是面对一笔没有身份的库存差额。
+
+### 3.5 为什么事件写入失败时不能立即回滚
+
+此时不能武断地认为整条链路完全失败：调用结果可能未知，或后续对账仍能恢复事件。入口选择保留 Redis 预占，让预占账本和对账机制判断，而不是请求线程立即做可能错误的补偿。
+
+阅读时重点观察：
+
+- `reserve()` 的成功、明确失败和调用异常分别怎样处理；
+- `createPending()` 失败后为什么没有直接调用回滚 Lua；
+- 状态查询为何按“MySQL 订单 → 事件 → Redis 预占”的顺序判断；
+- 依赖不可用时为何返回 `UNAVAILABLE`，而不是误报 `NOT_FOUND`。
+
+---
+
+## 4. 发送模块：谁挑任务，谁真正发消息
+
+这两个职责被刻意拆开：
+
+| 模块 | 职责 | 不负责什么 |
+|---|---|---|
+| `SeckillOrderPublishRetryTask` | 扫描、抢租约、创建 attempt、安排下次时间、触发发送 | 不理解 RabbitTemplate 回调细节 |
+| `SeckillOrderPublisher` | 组装消息属性并执行一次 `convertAndSend` | 不扫描、不自行重试、不直接改变事件状态 |
+
+### 4.1 发送调度器：`SeckillOrderPublishRetryTask`
+
+核心调用链：
 
 ```text
-eventId    业务事件 ID，也是 messageId
-orderId    订单主键，入口提前生成
-userId     下单用户
-voucherId  秒杀券
-createdAt  创建时间，Unix 毫秒
-version    消息结构版本，当前为 1
+publishDueEvents()
+  -> findDueForPublish()
+  -> publishOneEvent(event)
+     -> claimLease(eventId, owner, leaseSeconds)
+     -> 检查自动发送次数上限
+     -> createNextAttempt(eventId)
+     -> publisher.send(attempt, message)
+     -> 延后 next_retry_time
+     -> finally releaseLease(eventId, leaseToken)
 ```
 
-`attemptId` 不属于业务消息体，它标识一次实际发送，放在 CorrelationData 和 Header 中。
+`createNextAttempt()` 在同一个 MySQL 事务中：
 
-为什么同时需要两个 ID：
+1. 增加事件的 `retry_count`；
+2. 插入一条状态为 `WAITING` 的发送尝试；
+3. 为这次尝试生成独立 `attemptId` 和递增的 `attemptNo`。
 
-- `eventId`：同一业务意图，多次发布仍是同一个事件。
-- `attemptId`：每次发送分别记录 Confirm、Return、异常和时间。
+如果 `send()` 同步抛异常，任务把该 attempt 记录为 `UNKNOWN`，再触发决策器。因为客户端抛异常只能证明本地没有拿到确定结果，不能普遍证明 Broker 一定没收到。
 
-### 3.5 消费事务
+### 4.2 八次发送、七个退避与 90 秒终局窗口
 
-`SeckillOrderConsumer` 校验消息后调用 `VoucherOrderHandler.createOrder()`。后者在一个 MySQL 事务中：
-
-1. `SELECT ... FOR UPDATE` 锁定事件行。
-2. 根据事件状态判断幂等、迟到消息或回滚竞争。
-3. 查询同一用户是否已有该券订单。
-4. 使用 `stock > 0` 条件更新 MySQL 库存。
-5. 插入订单。
-6. 把事件标记为 CONSUMED。
-7. 事务提交后，监听方法正常返回，Spring 容器才 ACK。
-
-订单、库存和事件状态同库同事务；其中一步失败，三者一起回滚。
-
-## 4. Confirm、Return 与 Consumer ACK
-
-### 4.1 三者回答不同问题
-
-| 机制 | 方向 | 回答的问题 | 不证明什么 |
-| --- | --- | --- | --- |
-| Publisher Confirm | Broker → Producer | Broker 是否接受本次发布 | 不证明消费者已完成业务 |
-| Return | Exchange → Producer | 消息是否无法路由到任何 Queue | 不证明消费成功或失败 |
-| Consumer ACK | Consumer → Broker | 本次投递是否可从 Queue 删除 | 不证明生产者收到 Confirm |
-
-Publisher Confirm 与 Consumer ACK 完全正交。把两者都叫“ACK”容易混淆，面试时必须说清方向。
-
-### 4.2 四个典型场景
-
-| 场景 | Confirm | Return | Consumer ACK |
-| --- | --- | --- | --- |
-| 正常入队并消费 | ACK | 无 | 业务成功后 ACK |
-| Exchange 不存在 | NACK、Channel 异常或发送异常 | 通常不是 Return 场景 | 无 |
-| Exchange 存在，Routing Key 无绑定 | 通常 ACK | `mandatory=true` 时 Return | 无 |
-| 消费事务成功，ACK 前连接断开 | 生产侧早已结束 | 无 | Broker 未收到，可能重投 |
-
-### 4.3 当前生产端配置
-
-```yaml
-publisher-confirm-type: correlated
-publisher-returns: true
-template:
-  mandatory: true
-  retry:
-    enabled: false
-```
-
-- correlated Confirm 用 `attemptId` 关联一次发送。
-- `mandatory=true` 使不可路由消息返回生产者。
-- 模板重试关闭，发送次数统一由 Outbox 控制。
-
-### 4.4 为什么“结果未知”不能当失败
-
-假设 Producer 已把消息写入网络，Broker 也已入队，但连接在 Confirm 返回前断开。Producer 只看到超时，无法判断消息到底有没有到达。
-
-如果此时回滚 Redis，原消息随后仍可能被 Consumer 创建订单，造成“库存已恢复但订单成功”。因此项目把同步异常和 Confirm 超时记为 UNKNOWN，允许补偿发布，但禁止仅凭未知结果回滚。
-
-### 4.5 Spring AMQP 2.2 的回调边界
-
-当前代码同时使用：
-
-- `CorrelationData` Future 处理 Confirm。
-- `RabbitTemplate.ReturnCallback` 记录不可路由证据。
-
-Spring AMQP 2.2 文档与后续版本在 ReturnedMessage 和 Confirm Future 的顺序保证上存在版本差异。不能只凭新版示例断言“Return 一定先于 Confirm Future 可见”。
-
-**【边界】** 当前实现会把 Return 单独写入发布尝试表，但迟到 Return 与事件状态的最终收敛仍应通过真实 Broker 故障测试验证，不能只靠单元测试推断。
-
-## 5. Outbox 与发布尝试证据
-
-### 5.1 Outbox 解决的窗口
-
-错误设计：
+当前发送上限是 **8 次**，准确关系是：
 
 ```text
-写业务状态 → 直接发 MQ
+首次发送
+  -> 等 1 秒，第 2 次发送
+  -> 等 2 秒，第 3 次发送
+  -> 等 4 秒，第 4 次发送
+  -> 等 30 秒，第 5 次发送
+  -> 等 120 秒，第 6 次发送
+  -> 等 600 秒，第 7 次发送
+  -> 等 1800 秒，第 8 次发送
+  -> 退避表耗尽，nextDelaySeconds(8) 返回 -1
+  -> 不立刻转人工，改等 90 秒终局窗口
 ```
 
-进程可能在两步之间崩溃；本地数据库事务不能覆盖 RabbitMQ。
+所以是“**首次发送 + 7 次重发 = 8 次发送**”，七个数字是相邻两次发送之间的等待，不是总发送次数。
 
-Outbox 设计：
+耗尽判断分两步完成：
+
+1. 每次正常发送后，`deferNextRetry()` 根据 `attemptNo` 计算下一次时间。第 8 次发送后得到 `-1`，任务不会再安排第 9 次，而是把 `next_retry_time` 推迟 `FINAL_DECISION_WAIT_SECONDS=90` 秒。
+2. 90 秒后，Outbox 扫描再次选中事件。`publishOneEvent()` 抢到租约后、创建新 attempt 前检查 `completedAttempts >= maxAutomaticAttempts()`；如果事件仍处于可发布状态，才调用 `recordManualReviewEscalation()`。
+
+这 90 秒在等三类迟到结果：第 8 次发送的 Confirm/Return、30 秒确认超时任务的 UNKNOWN 处理，以及消费者可能已经完成的订单事务。90 秒必须大于默认 30 秒确认超时，否则 Outbox 可能在超时任务落证据之前就停止自动流程。
+
+最终升级在同一 MySQL 事务中完成两件事：
+
+- 事件转为 `MANUAL_REVIEW`，停止自动发送；
+- 写入来源为 `SOURCE_PUBLISH`、错误码为 `publish_retry_exhausted` 的失败单，保证人工处置有入口。
+
+注意：耗尽检查属于 Outbox 扫描任务，但准确位置是 `publishOneEvent()` 抢到租约之后、创建第 9 个 attempt 之前，不是在 `send()` 回调中执行。
+
+### 4.3 唯一实际发送入口：`SeckillOrderPublisher.send()`
+
+它做四件事：
+
+1. 校验 attempt 和 message；
+2. 创建包含 `attemptId/eventId/orderId` 的 `SeckillOrderCorrelationData`；
+3. 设置消息头、`messageId=eventId` 和持久化投递模式；
+4. 调用 `RabbitTemplate.convertAndSend(exchange, routingKey, message, ..., correlationData)`，并把 Confirm Future 交给处理器。
+
+消息头中的 `attemptId` 让 Return 回调可以定位具体发送；`eventId` 让所有模块定位同一业务事件；消息持久化只能提高 Broker 重启后的保留能力，不能替代 Confirm、Outbox 或消费幂等。
+
+### 4.4 为什么实际发送点必须尽量唯一
+
+如果入口服务、重试任务、管理接口各自调用 `RabbitTemplate`，就容易出现：
+
+- 有的发送没有 attempt 记录；
+- 有的发送没有绑定 Confirm；
+- 回调无法定位发送来源；
+- 重试次数和真实发送次数不一致。
+
+当前项目把“执行一次发送”收口在 Publisher，把“是否应该再发送”交给任务和决策器。
+
+---
+
+## 5. 回调机制：只保存证据，不擅自做业务补偿
+
+必须先记住：生产者 Confirm 与消费者 ACK 是两套独立机制。
+
+- Confirm：Broker 告诉生产者，这次发布是否被 Broker 接受；
+- Return：消息到达交换机后无法路由到队列；
+- Consumer ACK：消费者是否成功处理投递，与生产者 Confirm 不是一回事。
+
+项目中有三条“发送结果”入口：
+
+| 入口 | 触发条件 | attempt 证据 | 后续动作 |
+|---|---|---|---|
+| `SeckillPublishConfirmHandler` | Confirm Future 完成 | ACK / NACK / UNKNOWN | 调用决策器 |
+| `RabbitMqPublisherCallback` | mandatory 消息无法路由 | `returned=true`，保存 reply 信息 | 只补充 Return 证据 |
+| `SeckillPublishConfirmTimeoutTask` | WAITING 超过阈值 | UNKNOWN | 调用重试决策 |
+
+### 5.1 Confirm：`SeckillPublishConfirmHandler`
+
+`attach()` 给本次发送的 `CorrelationData` Future 注册处理逻辑。结果分支：
 
 ```text
-先把“待发送事件”写进 MySQL
-→ 独立任务扫描
-→ 发送
-→ 根据证据推进状态
+ACK 且没有 ReturnedMessage
+  -> attempt 记 ACK
+  -> event 尝试转 CONFIRMED
+
+ACK 但已观察到 ReturnedMessage
+  -> attempt 同时保留 ACK 与 returned 证据
+  -> 交给决策器，不当成可消费成功
+
+NACK 或 confirm 为空
+  -> attempt 记 NACK
+  -> 交给决策器
+
+Future 异常
+  -> attempt 记 UNKNOWN
+  -> 触发重试方向的决策
 ```
 
-只要事件仍在数据库，发布任务就能在进程恢复后继续处理。
+为什么 ACK 后还检查 Return？因为“交换机接收发布”不等于“成功路由进目标队列”。项目需要同时保存两类证据。
 
-### 5.2 为什么需要 CAS 和租约
+### 5.2 Return：`RabbitMqPublisherCallback`
 
-多个应用实例可能同时扫描到同一事件：
+该类注册为当前 Spring AMQP 版本使用的 `RabbitTemplate.ReturnCallback`。它从消息头取出 `attemptId/eventId`，记录退回码、退回原因、交换机和 routing key。
 
-- CAS 保证只有满足当前状态和版本的更新能成功。
-- 租约记录 `lease_owner`、`lease_until` 和 `lease_token`。
-- 实例宕机后租约自动过期，任务可被重新领取。
-- fencing token 防止旧持有者在租约过期后继续覆盖新结果。
+它故意不直接把事件改成回滚：
 
-租约不是永久锁；它把“实例失联”转换成“等待到期后重试”。
+- Confirm 与 Return 是异步到达的；
+- 同一个事件可能已有其他 attempt；
+- 另一条发送可能已进入队列或已经建单；
+- 是否回滚必须看全局证据，而不是一条回调。
 
-### 5.3 为什么不能只在事件表记录最后结果
+### 5.3 回调超时：`SeckillPublishConfirmTimeoutTask`
 
-同一个 event 可能发送多次：
+定时任务扫描长时间处于 `WAITING` 的 attempt，默认约 30 秒后记为 `UNKNOWN`，再调用决策器。
+
+它还覆盖一个容易忽略的崩溃窗口：`createNextAttempt()` 已提交，但进程在真正发送前崩溃。此时不会有 Confirm，也不会有同步异常，只有超时扫描能让记录继续流转。
+
+### 5.4 阅读边界
+
+当前项目使用 Spring AMQP 2.2 风格的 `CorrelationData` Future 与 `ReturnCallback`。阅读新版本文章时，不要直接把 `ReturnsCallback` 等新 API 套进当前源码。真实 Broker 环境还应验证 Confirm、Return 的时序和迟到回调是否最终收敛。
+
+---
+
+## 6. 决策机制：所有证据汇总后才能决定
+
+这是整套代码最应该精读的类：`SeckillOrderFailureDecisionService`。
+
+### 6.1 为什么需要独立决策器
+
+错误做法是：某次发送 NACK，就立即回滚 Redis。
+
+反例：第一次发送其实已经进入队列，但 Confirm 丢失；第二次重试收到 NACK。如果只看最后一次结果并回滚，消费者仍可能建立订单，于是“订单成功 + 库存又退回”。
+
+因此决策器读取一个事件的完整快照：
+
+- MySQL 订单是否已经存在；
+- 当前事件状态；
+- 所有发送 attempt 的 ACK/NACK/UNKNOWN/WAITING；
+- 每次 attempt 是否被 Return；
+- 本次触发来自 Confirm 完成还是重试信号。
+
+### 6.2 五种决策
+
+| 决策 | 含义 |
+|---|---|
+| `MARK_CONSUMED` | 订单已经存在，事件应收敛到已消费 |
+| `WAIT` | 仍有可能投递，暂时不能回滚 |
+| `RETRY_PUBLISH` | 保留 Redis 预占，安排再次发送 |
+| `ROLLBACK` | 所有已知发送都明确失败，可进入回滚流程 |
+| `MANUAL_REVIEW` | 证据矛盾或超出自动处理能力 |
+
+### 6.3 当前判断优先级
+
+按源码顺序理解，不要打乱：
+
+1. **订单已存在**：返回 `MARK_CONSUMED`。真实业务结果优先于消息回调。
+2. **事件已是 CONSUMED，但订单不存在**：状态与事实矛盾，进入 `MANUAL_REVIEW`。
+3. **存在“可能已投递”的 attempt**：不能回滚。重试信号触发时返回 `RETRY_PUBLISH`，Confirm 完成触发时通常先 `WAIT`。
+4. **还没有 attempt**：重试信号触发时安排发布，否则等待。
+5. **所有 attempt 都是确定失败**：返回 `ROLLBACK`。
+6. **无法安全归类**：返回 `MANUAL_REVIEW`。
+
+“可能已投递”主要指：attempt 没有被 Return，且状态是 `ACK`、`WAITING` 或 `UNKNOWN`。“确定失败”需要证据表明每次发送都不可消费，例如被 Return，或明确 NACK。
+
+### 6.4 用四个例子掌握
+
+| 证据 | 决策 | 原因 |
+|---|---|---|
+| 订单存在，最后一次 NACK | `MARK_CONSUMED` | 业务已完成，不能回滚 |
+| attempt=ACK，未 Return，订单暂不存在 | `WAIT` 或后续重试 | 消息可能在队列或消费中 |
+| attempt=UNKNOWN，未 Return | `RETRY_PUBLISH` | 可重发，但必须保留预占并依赖消费幂等 |
+| 所有 attempt 均 NACK/Return，订单不存在 | `ROLLBACK` | 已没有已投递成功的证据 |
+
+### 6.5 决策与执行分离
+
+`decide(snapshot)` 尽量是纯判断；`applyDecision()` 才调用事件服务执行 CAS 状态转换或创建人工工单。这样做的价值是：
+
+- 决策规则可以用输入快照单测；
+- 回调、超时任务可以复用同一套规则；
+- 决策器不直接碰 Redis，补偿仍由专门任务执行；
+- 状态竞争失败时可以重新读取，而不是覆盖其他线程结果。
+
+---
+
+## 7. 事件状态机与条件更新：状态不是随便 update 的
+
+### 7.1 主要状态
+
+| 状态 | 含义 |
+|---|---|
+| `PENDING` | 已记录，等待或允许发布 |
+| `CONFIRMED` | 已得到可接受的发布确认 |
+| `PUBLISH_UNKNOWN` | 发送结果不确定，仍禁止直接回滚 |
+| `CONSUMED` | MySQL 订单已落库 |
+| `ROLLBACK_PENDING` | 已决定回滚，等待补偿任务 |
+| `ROLLBACK_EXECUTING` | 某个带 token 的执行者正在回滚 |
+| `ROLLED_BACK` | Redis 预占已退回或确认无需再退 |
+| `DLQ` | 消费失败并进入死信处理链路 |
+| `MANUAL_REVIEW` | 自动流程停止，等待人工判断 |
+| `FAILED` | 遗留兼容状态，不应把它理解成当前唯一失败终态 |
+
+正常成功主线：
 
 ```text
-attempt-1：UNKNOWN
-attempt-2：ACK，未 Return
-attempt-3：NACK
+PENDING -> CONFIRMED -> CONSUMED
 ```
 
-如果只保留“最后一次 NACK”，会错误推断消息从未到达。发布尝试表保留每次发送证据，失败决策必须查看全部尝试。
-
-当前决策顺序：
-
-1. MySQL 订单已存在：标记 CONSUMED，绝不回滚。
-2. 任一尝试可能已投递：等待或继续补偿，禁止回滚。
-3. 所有尝试都明确 NACK 或 Return，且无订单：允许进入 ROLLBACK_PENDING。
-4. 证据矛盾：MANUAL_REVIEW。
-
-### 5.4 当前发布退避
-
-自动发送最多 8 次：首次发送，加 7 个退避轮次。
+发布失败补偿主线：
 
 ```text
-第 1 次后：1 秒
-第 2 次后：2 秒
-第 3 次后：4 秒
-第 4 次后：30 秒
-第 5 次后：2 分钟
-第 6 次后：10 分钟
-第 7 次后：30 分钟
-第 8 次后：等待 90 秒终局窗口，再转人工
+PENDING/PUBLISH_UNKNOWN
+  -> ROLLBACK_PENDING
+  -> ROLLBACK_EXECUTING
+  -> ROLLED_BACK
 ```
 
-Confirm 默认 30 秒超时，每 5 秒扫描 WAITING 尝试。最后的 90 秒必须大于 Confirm 超时，避免最后一次刚发出就转人工。
+异常主线最终可能进入 `DLQ` 或 `MANUAL_REVIEW`。
 
-## 6. Broker 持久性与高可用
+### 7.2 基于当前状态的条件更新
 
-### 6.1 三个“持久化”条件
+`SeckillOrderEventService.applyCasUpdate()` 不做“无条件把状态设成 X”，而是：
 
-要让普通 AMQP 0-9-1 消息在 Broker 重启后具备恢复条件，至少需要：
+```sql
+UPDATE ...
+SET status = 目标状态, row_version = row_version + 1, ...
+WHERE event_id = ?
+  AND status IN (状态机允许的来源状态)
+```
 
-1. Exchange durable。
-2. Queue durable。
-3. Message delivery mode 为 persistent。
+具体 SQL 可能按方法拆分，但阅读重点是：允许来源状态、影响行数，以及更新未命中后是否已处于目标状态。
 
-当前项目三项都配置了。
+它解决的是并发覆盖：消费者刚把事件改为 `CONSUMED`，迟到的 NACK 回调不能再把它改成回滚状态。更新失败不代表数据库坏了，通常代表其他线程已先完成合法转换，需要重新读取结果。
 
-但这不等于“任何故障都不丢”：
+这里要特别准确：当前普通状态推进以 `status IN (...)` 作为比较条件，同时递增 `row_version`；它没有在 `WHERE` 中比较旧的 `row_version`，因此不要把它讲成“按版本号实现的乐观锁”。租约与回滚流程另有 `lease_token` 条件，用来隔离过期执行者。
 
-- 单节点磁盘损坏不由 durable 自动解决。
-- 发布者必须等待 Confirm 才知道 Broker 是否承担该次发布。
-- Consumer 必须在业务成功后 ACK。
-- DLX 转发本身也是一次发布，也可能失败。
+### 7.3 状态机类的价值
 
-### 6.2 当前是 Classic Queue，不是 Quorum Queue
+`SeckillOrderEventStateMachine` 集中描述合法边。业务类先问状态机“允许从哪些来源转到目标”，事件服务再做基于状态的条件更新。新增状态时应该先审查状态图，而不是在各任务里散落 `if`。
 
-`RabbitMqConfig` 没有设置 `x-queue-type=quorum`，因此不能把项目描述成 Quorum Queue 方案。
+---
 
-| 队列 | 重点 |
-| --- | --- |
-| Classic Queue | 通用队列；现代 RabbitMQ 中默认不代表跨节点复制 |
-| Quorum Queue | 基于多数派复制，面向数据安全和高可用；需要多数副本在线 |
+## 8. 租约机制：多实例怎样抢任务而不互相踩
 
-Quorum Queue 在确认、多副本和故障恢复上提供更强语义，但会增加磁盘、网络和延迟成本。是否迁移必须结合 Broker 版本、节点数、磁盘和容量测试决定。
+租约不是业务锁，它是“在一段时间内允许某个执行者处理该事件”的临时所有权。
 
-**【边界】** 项目未确认 RabbitMQ 集群、Quorum Queue、磁盘告警和节点故障恢复，不能声称 Broker 层高可用已经完成。
+### 8.1 发布租约
 
-### 6.3 DLX 也不是绝对可靠
+`claimLease(eventId, owner, leaseSeconds)` 的条件包括：
 
-经典队列将死信重新发布到 DLX 时，目标 Exchange 或 Queue 不可用可能导致死信丢失。项目因此把 MySQL `tb_seckill_failure_case` 作为失败事实，把 DLQ 当作运维副本。
+- 状态仍允许发布；
+- 现有租约为空或已过期；
+- 使用数据库当前时间判断有效期。
 
-这是“先落失败记录，再拒绝进 DLQ”的原因，不是多写一张表的形式主义。
+抢占成功后写入：
 
-## 7. Consumer ACK、重试与 Prefetch
+- `lease_owner`：谁抢到；
+- `lease_until`：何时自动失效；
+- `lease_token`：每次抢占递增；
+- `row_version`：事件版本递增。
 
-### 7.1 当前 `acknowledge-mode: auto` 的准确含义
+任务处理结束时执行 `releaseLease(eventId, leaseToken)`，只有 token 仍匹配才能释放。
 
-Spring AMQP 的 AUTO 不是 RabbitMQ 协议层“消息一发出就自动确认”。在当前监听容器中：
+### 8.2 为什么有 owner 还需要 token
 
-- Listener 正常返回：容器发送 ACK。
-- Listener 抛异常：由重试、Recoverer 和 requeue 策略决定后续动作。
-
-因此消费事务必须在方法返回前提交。若先返回再异步写库，容器可能已经 ACK，之后失败无法重投。
-
-### 7.2 ACK、NACK、Reject
-
-| 操作 | 可批量 | 可选择 requeue | 作用 |
-| --- | --- | --- | --- |
-| ACK | 是 | 否 | 成功处理，可删除投递 |
-| NACK | 是 | 是 | 否定确认，可重入队或死信 |
-| Reject | 否 | 是 | 否定单条投递 |
-
-`requeue=true` 会让消息回主队列；若异常不会自行恢复，可能形成高频热循环。
-
-### 7.3 当前消费重试
+考虑时间线：
 
 ```text
-最多 4 次尝试 = 初次消费 + 3 次重试
-间隔约 1 秒、2 秒、4 秒
-耗尽后交给 MessageRecoverer
+T1  worker-A 抢到 token=7，随后长时间暂停
+T2  租约过期，另一次任务抢到 token=8
+T3  旧 worker-A 恢复，执行 finally 释放租约
 ```
 
-异常分三类：
+如果只按 `owner` 释放，尤其同一实例再次抢占时，旧任务可能清掉新租约。token 是栅栏版本：旧执行者拿着 7，无法修改已经属于 8 的租约。
 
-- 临时故障：数据库超时、连接故障、死锁等，有限重试。
-- 永久消息错误：字段缺失、非法 ID、版本不支持，不重试。
-- 一致性冲突：订单事实和事件事实矛盾，不做相同业务重试，转人工。
+### 8.3 为什么租约必须会过期
 
-### 7.4 Prefetch 与并发
+进程可能在抢占后崩溃，永久锁会让事件永远无法再处理。租约到期后其他实例可以接管。项目使用 MySQL 时间，减少不同应用实例时钟漂移带来的判断分歧。
 
-当前配置：
+### 8.4 回滚租约比发布租约更严格
+
+`claimForRollback()` 不只是加租约，还把状态从 `ROLLBACK_PENDING` 改成 `ROLLBACK_EXECUTING` 并返回 token。最终 `markRolledBack()` 必须同时满足：
+
+- 状态仍是 `ROLLBACK_EXECUTING`；
+- token 与本次执行者一致。
+
+这是为了保护“Lua 已恢复库存，但 MySQL 尚未写成 ROLLED_BACK”的危险窗口。
+
+---
+
+## 9. 消费机制：真正的业务一致性在 MySQL 事务里
+
+### 9.1 Listener 只做入口控制
+
+`SeckillOrderConsumer.consume()`：
+
+1. 校验消息和版本；
+2. 调用 `VoucherOrderHandler.createOrder()`；
+3. 只有确认是同一订单已存在时，才把 `DuplicateKeyException` 当成幂等成功；
+4. 其他异常继续抛出，交给容器重试/死信机制。
+
+不要把所有唯一键冲突都吞掉。否则数据模型中的其他冲突也会被伪装成“重复消费成功”。
+
+### 9.2 `VoucherOrderHandler.createOrder()` 必读顺序
+
+该方法在一个 MySQL 事务内完成：
 
 ```text
-concurrency = 3
-max-concurrency = 10
-prefetch = 10
+SELECT event FOR UPDATE
+  -> event 不存在：一致性异常
+  -> 已 CONSUMED：幂等返回
+  -> 已 ROLLED_BACK：拒绝迟到消息
+  -> ROLLBACK_EXECUTING：抛可重试异常，等待回滚结束
+  -> ROLLBACK_PENDING：先 CAS 取消回滚，抢消费权
+  -> 查询订单是否已存在
+  -> MySQL 条件扣库存（stock > 0）
+  -> 插入订单
+  -> 事件改为 CONSUMED
+  -> 提交事务
 ```
 
-Prefetch 限制每个 Consumer 可持有的未确认消息数。粗略上限不是全局 10，而与活跃 Consumer 数相关；例如 3 个 Consumer 各自最多预取 10 条，可能同时存在约 30 条未确认消息。
+这里同时使用了三层保护：
 
-调大 Prefetch：
+- 事件行锁与状态机：协调消费和回滚；
+- 订单唯一约束/存在性检查：处理重复消息；
+- `stock > 0` 条件更新：MySQL 最终写入时不超卖。
 
-- 减少等待网络往返，提高吞吐。
-- 增加单个消费者持有的未确认消息。
-- 慢消息会让分配不均更明显。
-- 应用和 Broker 内存压力上升。
+### 9.3 为什么 Redis 扣过一次，MySQL 还要扣库存
 
-增加 Consumer 并发也不是免费扩容：最终瓶颈可能转移到数据库连接池、同一库存行和磁盘。
+Redis 是高并发资格层，MySQL 是最终业务事实。异步链路、缓存重建、人工操作都可能引入差异，因此落单时仍由 MySQL 做条件扣减，不能把 Redis 当成永久唯一真相。
 
-## 8. 重复投递与幂等
+### 9.4 `acknowledge-mode: auto` 不等于 RabbitMQ 协议 autoAck
 
-### 8.1 为什么会重复
+在 Spring Listener 容器语义下，方法正常返回后容器才 ACK；方法抛异常则进入重试或拒绝流程。它不是“消息一送到客户端就无条件确认”的 fire-and-forget。
 
-最常见时间线：
+当前主要消费参数可在配置中看到：并发消费者、最大并发、prefetch、是否默认重新入队，以及约 `1/2/4` 秒的本地重试。理解参数作用即可，不必背数字。
+
+---
+
+## 10. 消费失败、重试与 DLQ
+
+### 10.1 `RabbitMqConfig` 只精读这些位置
+
+不需要逐行背 Bean，重点找：
+
+1. 主交换机、主队列、DLX、DLQ 的 durable 声明与绑定；
+2. JSON 消息转换器；
+3. 主 Listener Factory 的重试 Advice；
+4. 哪些异常被判定为永久失败，哪些允许重试；
+5. `MessageRecoverer` 如何做到“先保存失败证据，再拒绝进入 DLQ”；
+6. DLQ Listener Factory 为什么移除业务重试 Advice。
+
+### 10.2 异常分类
+
+永久消息错误、一致性冲突、转换失败等不适合原地反复重试；临时数据库或网络异常默认允许短重试。重试耗尽后：
 
 ```text
-Consumer 完成 MySQL 事务
-→ 准备 ACK
-→ 连接断开
-→ Broker 没收到 ACK
-→ 消息重新投递
+构造 failure evidence
+  -> 持久化 failure case / 更新事件
+  -> 持久化成功：RejectAndDontRequeue，进入 DLQ
+  -> 持久化失败：ImmediateRequeue，避免消息丢失且没有审计记录
 ```
 
-RabbitMQ 无法知道业务事务已经提交，只能按未确认处理。可靠消费的常见目标是 at-least-once，再由业务幂等吸收重复。
+设计重点是顺序：不能先把消息扔进 DLQ，再发现失败原因没有保存下来。
 
-### 8.2 项目四层防线
+### 10.3 两个辅助 Listener
 
-1. Redis 用户 Set：入口快速拦截重复预留。
-2. 事件状态：CONSUMED 直接幂等返回。
-3. 消费事务查询已有订单。
-4. 数据库 `(user_id, voucher_id)` 唯一索引：并发竞态下的最终底线。
+- `SeckillRabbitListenerErrorHandler`：处理消息还没进入业务 Listener 就发生的转换/参数错误；也是先保存证据，再决定拒绝或重新入队。
+- `SeckillOrderDeadLetterConsumer`：补充 `x-death` 和 DLQ 到达证据；若订单后来已经成功，可关闭失败工单。它不负责直接回滚，也不是自动重放器。
 
-“先查询再插入”不能替代唯一索引：两个事务可能同时查询不到，然后同时插入。
+DLQ 的含义是“需要隔离和调查”，不是“消息自然失败后就安全结束”。
 
-### 8.3 DuplicateKey 不能一律当成功
+---
 
-捕获 `DuplicateKeyException` 后，项目会再次确认目标订单是否存在。只有业务订单确实存在，才把事件收敛为 CONSUMED。
+## 11. 回滚机制：只有确定安全时才退 Redis
 
-其他唯一约束、数据错误或错误主键冲突不能伪装成幂等成功。
+`SeckillReservationRollbackTask` 处理 `ROLLBACK_PENDING` 事件。
 
-### 8.4 为什么不说 Exactly-once
-
-Broker 投递与 MySQL 提交跨越两个系统，没有一个原子提交点。即使 RabbitMQ 只投递一次，Consumer 在外部系统的副作用也可能因超时重试而重复。
-
-项目提供的是：
+核心流程：
 
 ```text
-至少一次投递倾向 + 幂等业务处理 + 数据库唯一约束 + 对账收敛
+扫描待回滚事件
+  -> 再查一次 MySQL 订单
+     -> 已有订单：markConsumed，禁止回滚
+  -> claimForRollback()，进入 EXECUTING 并取得 token
+  -> seckill_rollback.lua 按 eventId 回滚 Redis 预占
+     -> 已恢复或本来就不存在：markRolledBack(token)
+     -> 库存键缺失/数据冲突/调用异常：记录失败并按策略重试
+  -> 超过自动能力：MANUAL_REVIEW
 ```
 
-面试时说“业务效果最终只生效一次”比“RabbitMQ 保证 exactly-once”准确。
+### 为什么需要 `ROLLBACK_EXECUTING`
 
-## 9. DLQ 与失败事实
+危险窗口是：Lua 已把库存加回，但数据库还没写 `ROLLED_BACK`。如果消费者此时照常建单，会造成订单成功而库存也被恢复。
 
-### 9.1 什么消息会死信
+消费者读到 `ROLLBACK_EXECUTING` 时会等待/重试；读到 `ROLLED_BACK` 时拒绝迟到消息。若还是 `ROLLBACK_PENDING`，消费者必须先用 CAS 取消回滚，谁先完成状态转换谁获得执行权。
 
-RabbitMQ 常见死信原因：
+### 为什么 Lua 要按 `eventId` 幂等
 
-- Consumer Reject/NACK 且 `requeue=false`。
-- 消息 TTL 到期。
-- Queue 超过长度限制。
-- Quorum Queue 超过 delivery limit。
+回滚任务也可能重复执行。Lua 根据预占记录判断：同一事件已经回滚时不能再次加库存。返回“已恢复”和“无需恢复”都可视为补偿完成；数据冲突则不能自作主张，必须记录并升级。
 
-当前业务主要使用第一种：消费重试耗尽后拒绝进入 DLQ。
+---
 
-### 9.2 正确顺序
+## 12. 对账机制：异步系统最后一道收敛网
+
+`SeckillOrderReconciliationTask` 不在正常请求主链上，但用于修复长期残留。只需理解两条方向。
+
+### 12.1 Redis → MySQL
+
+“扫描 Redis 预占”不是遍历所有 Redis Key，而是分两层找到候选券，再读取每张券的 `pending` ZSet：
 
 ```text
-消费重试耗尽
-→ 独立事务写 failure_case
-→ 推进事件到 DLQ 或 MANUAL_REVIEW
-→ 事务提交
-→ RejectAndDontRequeue
-→ Broker 尝试死信转发
+快速入口（每 60 秒）
+  -> MySQL 查询 end_time >= now - 7 天的券
+     （包含未结束的券，也包含最近 7 天已经结束的券；不限制 begin_time）
+  -> 对每张券读取 pending ZSet 中 score <= now - 30 分钟的 eventId
+  -> 每张券单批最多处理配置数量
+
+安全兜底（默认每小时整点）
+  -> 按 voucherId 游标分页遍历全部 tb_seckill_voucher
+  -> 对每张券执行同一个“预留超过 30 分钟”过滤
 ```
 
-若失败记录落库失败，`ImmediateRequeueAmqpException` 强制消息回主队列，避免既没有数据库证据又丢掉原消息。
+对应 Redis 操作在 Spring Data Redis 中是 `rangeByScore(pendingKey, 0, reservedBeforeMillis, 0, limit)`，等价于按时间分数读取 `0 ~ (now-30min)` 的最早一批预留。
 
-失败记录和 Reject 不能放在一个随后必然回滚的事务中，否则刚写入的记录会随异常一起回滚。
+为什么等 30 分钟：正常事件发布、Confirm、消费和预留清理都需要时间，刚写入的预留不能马上被当成孤儿；超过阈值仍留在 `pending`，才值得进入修复检查。这个阈值是“开始检查”，不是“直接回滚”——任务还会继续查询订单和事件状态。
 
-### 9.3 Listener 前的转换失败
+为什么需要两个入口：7 天回看让每分钟任务保持可控；如果故障持续超过 7 天，历史券会退出快速候选范围，所以每小时游标分页扫描全表负责最终兜底。源码明确禁止用 Redis `KEYS` 或全量 `SCAN` 代替。
 
-JSON 反序列化可能发生在业务 Listener 调用前，业务方法无法捕获。项目使用容器级 `SeckillRabbitListenerErrorHandler`：
+找到候选预留后：
 
-- 从原始 AMQP Message 提取 messageId 和受限 Header。
-- 保存受限长度的消息摘要。
-- 先写失败记录，再拒绝进入 DLQ。
+- 订单存在：必要时补事件为 `CONSUMED`，并完成/清理预占；
+- 订单不存在、事件也不存在：根据有效预占信息重建 `PENDING` 事件；
+- 预占内容损坏：保存失败证据并进入人工处理；
+- 事件已存在：交回正常状态机继续处理。
 
-原始不可信消息不能无限完整写日志或数据库，否则可能造成敏感信息泄露和存储放大。
+这条链修复“Redis 已扣，但 MySQL 事件没有成功创建”的窗口。
 
-### 9.4 DLQ Consumer 不做什么
+### 12.2 MySQL → Redis
 
-`SeckillOrderDeadLetterConsumer` 只补充 `x-death` 和到达证据：
+扫描事件：
 
-- 不直接恢复 Redis 库存。
-- 不自动重发业务消息。
-- 不把“进入 DLQ”视为业务必然失败。
+- `CONSUMED`：确保 Redis 预占被完成；
+- `ROLLED_BACK`：确认预占已移除；
+- 长时间卡在 `ROLLBACK_EXECUTING`：结合预占是否仍存在决定收敛到已回滚或重新待回滚；
+- 长期 `PUBLISH_UNKNOWN`：证据不足时升级人工处理。
 
-原因是消息进入 DLQ 时，另一条重复消息可能已经成功创建订单。恢复库存前必须重新核对订单、事件和全部发布证据。
+对账不是用来替代正常事务和回调，而是处理“所有实时机制都可能在某个窗口失败”的现实。
 
-## 10. Redis、RabbitMQ、MySQL 一致性
+---
 
-### 10.1 三个系统保存什么
+## 13. 两条完整时间线
 
-| 系统 | 当前事实 |
-| --- | --- |
-| Redis | 可售库存、一人一单集合、未收敛预留 |
-| RabbitMQ | 等待消费或未确认的传输副本 |
-| MySQL | 事件、发布尝试、订单、失败记录和审计事实 |
-
-没有一个本地事务可以同时提交三者，因此要逐个识别窗口。
-
-### 10.2 六个核心故障窗口
-
-#### 窗口 A：Redis 预留成功，PENDING 写入失败
-
-不能直接回滚，因为数据库错误不代表后续一定无法恢复。Redis 预留账本保留重建信息，对账任务扫描 ZSet 后补建事件。
-
-#### 窗口 B：PENDING 成功，发布前进程崩溃
-
-事件仍在 Outbox。租约到期后，发布任务重新扫描并发送。
-
-#### 窗口 C：消息可能到达，Confirm 丢失
-
-发布尝试标记 UNKNOWN，按退避补偿发送。存在可能投递证据时禁止自动回滚。
-
-#### 窗口 D：订单事务成功，ACK 丢失
-
-Broker 重投。事件已是 CONSUMED，Consumer 幂等返回；唯一索引继续兜底。
-
-#### 窗口 E：失败决策准备回滚，迟到消息开始消费
-
-事件为 ROLLBACK_PENDING 时，Consumer 必须先 CAS 取消回滚；回滚任务已抢占为 ROLLBACK_EXECUTING 时，Consumer 重试等待，避免一边恢复库存一边创建订单。
-
-#### 窗口 F：回滚 Lua 成功，数据库状态尚未更新时进程崩溃
-
-事件停在 ROLLBACK_EXECUTING。对账任务根据 Redis 预留是否仍存在判断：预留已消失则收敛 ROLLED_BACK；仍存在则恢复待回滚或转人工。
-
-### 10.3 回滚为什么按 eventId 校验
-
-用户可能经历：事件 A 预留 → A 回滚 → 事件 B 再次预留。若迟到的 A 只按 userId 回滚，会误删 B 并错误增加库存。
-
-回滚 Lua 必须确认 `userId → eventId` 映射仍指向当前事件：
-
-- 映射不存在：已经处理，幂等成功。
-- 映射指向其他事件：冲突，禁止修改库存。
-- 映射一致：删除当前预留，并只在确实移除用户时恢复库存。
-
-### 10.4 对账为什么是双向的
-
-- Redis → MySQL：发现孤儿预留，补建事件或核对订单。
-- MySQL → Redis：CONSUMED 清理预留；回滚卡住时收敛；UNKNOWN 超时转人工。
-
-库存不能简单设置为 MySQL 剩余库存。安全公式是：
+### 13.1 正常成功
 
 ```text
-Redis 可售库存 = MySQL 剩余库存 - 尚未生成订单的有效 Redis 预留数
+1. 请求生成 eventId/orderId
+2. Redis Lua 扣库存并写预占
+3. MySQL 创建 PENDING 事件
+4. 请求返回已受理
+5. 发布任务抢租约，创建 attempt#1(WAITING)
+6. Publisher 发送消息
+7. Broker Confirm ACK，事件可转 CONFIRMED
+8. Consumer 锁事件、扣 MySQL 库存、插订单、改 CONSUMED
+9. Listener 正常返回，容器 ACK
+10. 对账/完成脚本清理 Redis 预占
 ```
 
-直接覆盖会把仍在途的预留重新卖出。
-
-## 11. 状态机
-
-### 11.1 先按业务分组
-
-| 分组 | 状态 | 含义 |
-| --- | --- | --- |
-| 等待发布 | PENDING | 等待首次或补偿发布 |
-| 结果未知 | PUBLISH_UNKNOWN | 至少一次发送无法判定结果 |
-| 已到 Broker | CONFIRMED | ACK 且当前未发现 Return |
-| 成功终态 | CONSUMED | 订单事务完成 |
-| 等待回滚 | ROLLBACK_PENDING | 已允许回滚，等待任务执行 |
-| 回滚执行 | ROLLBACK_EXECUTING | Lua 执行窗口，阻止并发消费 |
-| 失败终态 | ROLLED_BACK | Redis 预留已恢复 |
-| 消费隔离 | DLQ | 失败记录已保存，消息进入死信流程 |
-| 人工处理 | MANUAL_REVIEW | 自动证据不足或重试耗尽 |
-| 历史兼容 | FAILED | 旧状态，新代码禁止写入 |
-
-### 11.2 主路径
+### 13.2 Confirm 丢失后重发
 
 ```text
-PENDING → CONFIRMED → CONSUMED
+1. attempt#1 可能已经进入队列，但没有收到 Confirm
+2. 超时任务把 attempt#1 记 UNKNOWN
+3. 决策器发现“可能已投递”，保留 Redis 预占并允许重发
+4. 创建 attempt#2，再次发送同一个 eventId/orderId
+5. 两条消息都到消费者也没关系：订单唯一约束 + 事件状态保证幂等
+6. 任意一条先建单，事件进入 CONSUMED
+7. 后续 NACK、Return 或重试任务看到订单存在，都应收敛到 MARK_CONSUMED
 ```
 
-Confirm 可能晚于消费，因此也允许：
+这就是“至少一次投递 + 业务幂等”，不是“消息绝不重复”。
 
-```text
-PENDING → CONSUMED
-PUBLISH_UNKNOWN → CONSUMED
-```
+---
 
-### 11.3 失败路径
+## 14. 不必逐行读的文件
 
-```text
-PENDING / PUBLISH_UNKNOWN
-  → ROLLBACK_PENDING
-  → ROLLBACK_EXECUTING
-  → ROLLED_BACK
-```
+| 文件/模块 | 知道这一点即可 |
+|---|---|
+| `SeckillOrderMessage` | MQ 业务载荷及版本字段 |
+| `SeckillOrderCorrelationData` | 把 attempt/event/order 与 Confirm Future 关联 |
+| `RabbitMqConstants` | 交换机、队列、routing key、消息头名称的集中定义 |
+| `SeckillOrderEvent` | Outbox 事件数据模型与状态常量 |
+| `SeckillPublishAttempt` | 单次发送的 ACK/NACK/UNKNOWN/Return 证据 |
+| Event/Attempt Mapper | 条件更新、扫描和 `FOR UPDATE` 的 SQL 入口；遇到状态问题再下钻 |
+| `SeckillFailureEvidence` | 从异常和消息头构造可审计证据 |
+| `SeckillFailureCaseService` | 失败工单、重试安排、人工升级与关闭 |
+| `SeckillOrderFailureAdminService` | 人工处理失败工单的管理入口 |
+| `SeckillPublishRetryPolicy` | 发布次数、退避和最终等待窗口 |
+| `SeckillRollbackRetryPolicy` | 回滚失败后的退避和上限 |
+| `SeckillStockInitScanTask` | Redis 秒杀库存初始化/修复扫描，不属于消息可靠投递主线 |
+| `VoucherOrderController` | HTTP 入口，MQ 机制很少 |
 
-消费失败路径：
+Lua 文件只需按需要读：
 
-```text
-PENDING / PUBLISH_UNKNOWN / CONFIRMED
-  → DLQ
-  → 人工重放到 PENDING，或核对后回滚，或关闭
-```
+- [`seckill.lua`](../../src/main/resources/seckill.lua)：资格判断、扣库存、写预占；
+- [`seckill_rollback.lua`](../../src/main/resources/seckill_rollback.lua)：按事件幂等回滚；
+- [`seckill_reservation_complete.lua`](../../src/main/resources/seckill_reservation_complete.lua)：订单完成后收尾预占；
+- 其他初始化/人工脚本不属于第一次阅读主线。
 
-### 11.4 状态机的三个保护
+---
 
-1. 每次自动迁移先经过纯状态机校验。
-2. 数据库 UPDATE 带来源状态和版本条件，避免并发覆盖。
-3. CONSUMED、ROLLED_BACK 终态禁止被迟到 Confirm、Return 或任务覆盖。
+## 15. 推荐的源码阅读法
 
-MANUAL_REVIEW 的出边只允许人工处置 Service 使用，自动任务不能擅自恢复。
+不要一次打开所有 MQ 类。按 6 轮读，每轮只回答一个问题。
 
-## 12. 顺序、积压与流量控制
+### 第 1 轮：消息从哪里来
 
-### 12.1 RabbitMQ 是否保证顺序
+读：`VoucherOrderServiceImpl` → `SeckillOrderPublishRetryTask` → `SeckillOrderEventService` 的扫描/租约/推迟时间方法 → `SeckillOrderPublisher`。
 
-Queue 入队具有顺序，但业务观察到的完成顺序会受以下因素影响：
+回答：请求线程为什么不发送？谁扫描 Outbox？哪里真正调用 RabbitTemplate？
 
-- 多 Producer 并发发布。
-- 多 Consumer 并发处理。
-- 某条消息失败后重新入队。
-- 不同消息处理耗时不同。
-- 消费事务和 ACK 完成时间不同。
+### 第 2 轮：发送结果怎样记录
 
-当前主队列最多扩展到 10 个 Consumer，不提供严格全局顺序。秒杀订单依赖每个事件独立幂等，而不是依赖所有订单串行。
+读：`SeckillPublishAttemptService` → `SeckillPublishConfirmHandler` → `RabbitMqPublisherCallback` → `SeckillPublishConfirmTimeoutTask`。
 
-若业务需要同一聚合内顺序，常见选择是按业务 Key 分区到固定 Queue、单活 Consumer，或在业务层用版本号拒绝乱序；代价是吞吐和复杂度。
+回答：ACK、NACK、Return、UNKNOWN 分别写到哪里？为什么一个事件有多条 attempt？
 
-### 12.2 消息积压怎么判断
+### 第 3 轮：为什么不能随便回滚
 
-先看两类数量：
+精读：`SeckillOrderFailureDecisionService`。
 
-- Ready：仍在 Queue 等待投递。
-- Unacked：已经投给 Consumer，但尚未确认。
+回答：订单存在时谁优先？什么叫可能已投递？什么条件才能回滚？
 
-典型判断：
+### 第 4 轮：并发怎样控制
 
-| 现象 | 优先怀疑 |
-| --- | --- |
-| Ready 持续上涨，Unacked 不高 | Consumer 数量不足、未启动或整体吞吐不足 |
-| Unacked 很高 | Consumer 处理慢、Prefetch 过大或下游阻塞 |
-| 两者都低但业务未完成 | Producer/路由/Outbox 或业务状态查询问题 |
+读：`SeckillOrderEventStateMachine` → `SeckillOrderEventService` 中的条件更新、`claimLease/releaseLease/claimForRollback`。
 
-扩容 Consumer 前必须检查 MySQL 连接池、库存热点行和 Redis 延迟，否则只是把积压从 Queue 转移到数据库。
+回答：基于来源状态的条件更新为什么能挡住迟到回调？token 防住了哪种旧执行者？
 
-### 12.3 容量估算
+### 第 5 轮：消费怎样落单
 
-最低需要三个量：
+读：`SeckillOrderConsumer` → `VoucherOrderHandler`。
 
-```text
-生产速率 λp（条/秒）
-单 Consumer 平均消费速率 λc（条/秒）
-Consumer 数 N
-```
+回答：重复消息怎样幂等？消费和回滚怎样争夺执行权？哪些动作在同一事务？
 
-若 `λp > N × λc` 持续存在，积压必然增长。估算还要加入失败重试放大、消息大小、数据库竞争和峰值持续时间。
+### 第 6 轮：异常怎样最终收敛
 
-项目尚未完成真实压测，所以配置中的 3～10 个 Consumer 不是吞吐承诺。
+选择性读：`RabbitMqConfig` → `SeckillReservationRollbackTask` → `SeckillOrderReconciliationTask` → DLQ 两个类。
 
-## 13. 可观测性
+回答：短重试、重新发布、回滚、对账、人工处理各负责哪一层？
 
-### 13.1 Broker 指标
+---
 
-- 主队列 Ready、Unacked、消费速率、ACK 速率。
-- Publisher Confirm ACK/NACK 数和延迟。
-- Return 数量。
-- DLQ Ready、Unacked 和增长速率。
-- Connection、Channel、Consumer 数。
-- 内存、磁盘、水位告警和节点状态。
+## 16. 用测试代替猜测
 
-### 13.2 业务指标
+读完一个机制，立刻读对应测试；测试比注释更接近可执行行为规范。
 
-- PENDING、PUBLISH_UNKNOWN、ROLLBACK_PENDING、DLQ、MANUAL_REVIEW 数量和最老年龄。
-- WAITING 发布尝试超时数。
-- 发布重试次数和耗尽数。
-- 消费重试、失败记录和人工处置数量。
-- Redis 有效预留数与 MySQL 订单差值。
-- 请求受理到 CONSUMED 的 P50/P95/P99 延迟。
+P0 测试：
 
-只监控 Queue 长度不够。消息可能已经离开 Queue，但事件卡在数据库状态或 Redis 预留中。
+- [`VoucherOrderServiceImplTests`](../../src/test/java/com/dish/review/service/VoucherOrderServiceImplTests.java)：入口异常和 Redis/MySQL 窗口；
+- [`SeckillOrderPublishRetryTaskTests`](../../src/test/java/com/dish/review/mq/SeckillOrderPublishRetryTaskTests.java)：租约、发送尝试和重试；
+- [`SeckillOrderEventServiceTests`](../../src/test/java/com/dish/review/service/SeckillOrderEventServiceTests.java)：基于状态的条件更新、扫描与租约；
+- [`SeckillOrderEventStateMachineTests`](../../src/test/java/com/dish/review/service/SeckillOrderEventStateMachineTests.java)：合法状态边；
+- [`VoucherOrderHandlerTests`](../../src/test/java/com/dish/review/service/VoucherOrderHandlerTests.java)：消费幂等和回滚竞争。
 
-### 13.3 一个排障顺序
+P1 测试：
 
-用户反馈“已抢到但一直没有订单”时：
+- `SeckillReservationRollbackTaskTests`：补偿执行窗口；
+- `SeckillOrderReconciliationTaskTests`：双向对账；
+- `SeckillRabbitListenerErrorHandlerTests`、`SeckillOrderDeadLetterConsumerTests`：错误证据与 DLQ；
+- 两个 RetryPolicy 测试：次数和退避边界。
 
-1. 用 `orderId` 查 MySQL 订单。
-2. 查事件状态和最后更新时间。
-3. 查全部 publish_attempt。
-4. 查主 Queue 和 DLQ。
-5. 查 Redis 预留反向索引。
-6. 查 failure_case 和审计记录。
-7. 根据事实决定等待、重放、回滚或人工关闭。
+单元测试能证明分支逻辑符合预期，但不能替代真实 RabbitMQ 集成验证。尤其需要在真实 Broker 下验证：mandatory Return、Confirm 时序、消费者重试、DLQ 路由、应用重启和迟到回调。
 
-禁止只看一条日志就恢复库存。
+---
 
-## 14. 纸面故障推演
+## 17. 读完后应该能回答
 
-每题先回答四个问题：消息可能在哪里、事件是什么状态、能否回滚、谁负责收敛。
-
-### 14.1 Exchange 名称错误
-
-**结论：** 可能出现 NACK、Channel 异常或同步发送异常。同步异常仍可能存在网络结果不确定性，先记录尝试证据；只有全部尝试明确失败且无订单时，失败决策才允许回滚。
-
-### 14.2 Routing Key 无绑定
-
-**结论：** Exchange 通常 Confirm ACK；`mandatory=true` 触发 Return。该次尝试明确没有进入目标 Queue，但仍要检查其他尝试是否可能成功。
-
-### 14.3 Confirm 30 秒未返回
-
-**结论：** 超时扫描把 WAITING 改为 UNKNOWN，安排补偿发布；不能据此回滚。
-
-### 14.4 Consumer 事务提交后、ACK 前宕机
-
-**结论：** Broker 重投；事件 CONSUMED 或唯一索引使重复消息幂等成功，然后重新 ACK。
-
-### 14.5 MySQL 临时超时
-
-**结论：** Listener 抛临时异常，按 1/2/4 秒有限重试。耗尽后先写失败记录，再拒绝进入 DLQ。
-
-### 14.6 Redis 预留后应用立即宕机
-
-**结论：** 若 PENDING 未写入，Redis 待对账 ZSet 仍保存预留；对账任务补建事件。不能因为 MySQL 暂时查不到就判定用户没有下单。
-
-### 14.7 回滚任务和迟到 Consumer 同时运行
-
-**结论：** 两者通过事件状态 CAS 竞争。Consumer 只有成功取消 ROLLBACK_PENDING 才能继续；任务已进入 ROLLBACK_EXECUTING 时 Consumer 必须等待。
-
-### 14.8 失败记录数据库不可用
-
-**结论：** Recoverer 抛 `ImmediateRequeueAmqpException`，保留原消息。不能 ACK，也不能只依赖 DLQ。
-
-### 14.9 DLX 目标不可用
-
-**结论：** 经典队列的死信转发可能失败；MySQL failure_case 仍是主要失败事实。需要告警和真实故障演练，不能声称 DLQ 永不丢。
-
-### 14.10 同一 event 的一次发送 ACK、另一次 NACK
-
-**结论：** ACK 且未 Return 表示存在可能投递，NACK 不能覆盖它。必须等待消费或人工核对，禁止按“最后结果 NACK”回滚。
-
-## 15. 源码阅读路线
-
-### 第一遍：只看正常链路
-
-1. `VoucherOrderController`
-2. `VoucherOrderServiceImpl.seckillVoucher()`
-3. `seckill.lua`
-4. `SeckillOrderEventService.createPending()`
-5. `SeckillOrderPublishRetryTask`
-6. `SeckillOrderPublisher`
-7. `SeckillOrderConsumer`
-8. `VoucherOrderHandler.createOrder()`
-
-目标：不看失败分支，独立画出第 0 章的主链路。
-
-### 第二遍：生产可靠性
-
-1. `application.yaml` 的 Confirm、Return、mandatory 和模板重试。
-2. `SeckillPublishAttempt`。
-3. `SeckillPublishConfirmHandler`。
-4. `RabbitMqPublisherCallback`。
-5. `SeckillPublishConfirmTimeoutTask`。
-6. `SeckillOrderFailureDecisionService`。
-
-目标：解释一次 event 为什么可能有多个 attempt，以及为什么 UNKNOWN 禁止回滚。
-
-### 第三遍：消费失败
-
-1. `RabbitMqConfig` 的 Listener 重试分类与 MessageRecoverer。
-2. `SeckillRabbitListenerErrorHandler`。
-3. `SeckillOrderDeadLetterConsumer`。
-4. `SeckillFailureCaseService`。
-
-目标：解释“先写失败记录，再进入 DLQ”的顺序。
-
-### 第四遍：跨存储收敛
-
-1. `SeckillReservationRollbackTask`。
-2. `seckill_rollback.lua`。
-3. `SeckillOrderReconciliationTask`。
-4. `SeckillStockInitScanTask`。
-5. `VoucherOrderServiceImpl.queryOrderStatus()`。
-
-目标：逐个对应第 10 章的六个故障窗口。
-
-### 第五遍：数据库约束
-
-阅读迁移目录，重点核对：
-
-- `(user_id, voucher_id)` 唯一索引。
-- 事件任务扫描组合索引。
-- 事件 `row_version`、租约和终态时间。
-- 发布尝试 `(event_id, attempt_no)` 唯一约束。
-- failure_case 幂等键。
-- 人工处置审计表。
-
-## 16. 高频面试题
-
-### 16.1 为什么项目使用 RabbitMQ
-
-**答题骨架：** 请求线程快速受理；Queue 缓冲峰值；Consumer 异步写订单；代价是必须处理重复、积压、结果未知和跨存储一致性。
-
-### 16.2 Confirm、Return、ACK 有什么区别
-
-**答题骨架：** Confirm 是 Producer 到 Broker；Return 是 Exchange 无法路由；Consumer ACK 是业务处理完成后通知 Broker 删除投递，三者互不替代。
-
-### 16.3 如何保证消息不丢
-
-**答题骨架：** 不承诺绝对不丢。Producer 用 Outbox、持久化消息、Confirm/Return、尝试证据和超时补偿；Broker 需要 durable Queue 和部署层高可用；Consumer 在事务成功后 ACK；失败记录和对账负责兜底。当前真实 Broker 故障演练仍未完成。
-
-### 16.4 为什么不用 RabbitMQ 事务
-
-**答题骨架：** Broker 事务开销大，也不能把 Redis 和 MySQL 一起纳入原子事务。项目使用 Outbox、Confirm、幂等和补偿，把失败转成可重试、可查询的状态。
-
-### 16.5 什么是 Outbox
-
-**答题骨架：** 先在本地数据库记录待发送事件，再由独立任务发布。它关闭“业务状态已保存但消息还未发送时进程崩溃”的窗口。项目事件表就是 Outbox，发布任务是唯一 Producer 入口。
-
-### 16.6 Confirm 超时为什么不能回滚
-
-**答题骨架：** 超时只表示生产者不知道结果，消息可能已入队。直接回滚会与迟到消费并发，造成库存恢复后仍创建订单。
-
-### 16.7 如何解决重复消费
-
-**答题骨架：** 接受 at-least-once，用 Redis 一人一单、事件状态、订单查询和数据库唯一索引四层幂等。事务提交后 ACK 丢失时，重投不会重复创建订单。
-
-### 16.8 为什么唯一索引不可缺少
-
-**答题骨架：** 查询后插入存在并发窗口，Redis 和应用锁也可能失效；唯一索引位于最终数据写入层，是防止重复订单落库的底线。
-
-### 16.9 重试和 DLQ 分别解决什么
-
-**答题骨架：** 重试处理短暂故障；DLQ 隔离主流程无法继续处理的消息。DLQ 不是自动补偿，也不是唯一失败事实。
-
-### 16.10 为什么先写失败记录再进 DLQ
-
-**答题骨架：** 经典队列的死信转发也可能失败。MySQL 失败记录必须先提交，DLQ 只保存运维副本；失败记录写不进去就重新入队。
-
-### 16.11 Prefetch 越大越好吗
-
-**答题骨架：** 不是。增大可提高流水线吞吐，但会增加未确认消息、内存占用和分配不均。要结合处理耗时、并发数、数据库容量和故障恢复时间调整。
-
-### 16.12 RabbitMQ 能保证顺序吗
-
-**答题骨架：** Queue 有入队顺序，但多 Producer、多 Consumer、重试和处理耗时会改变业务完成顺序。当前项目不承诺全局顺序，而依赖事件级幂等和状态机。
-
-### 16.13 消息积压怎么办
-
-**答题骨架：** 先区分 Ready 和 Unacked，再检查生产速率、消费耗时和下游数据库。不能盲目加 Consumer；可能把 Broker 积压转成数据库雪崩。
-
-### 16.14 Classic 与 Quorum Queue 怎么选
-
-**答题骨架：** Classic 适合一般队列；Quorum 基于多数派复制，适合强调数据安全和高可用的场景，但成本更高。当前项目没有声明 Quorum Queue，不能把它说成已实现能力。
-
-### 16.15 这套方案还有什么缺口
-
-**答题骨架：** 代码和单测已覆盖状态机、Outbox、失败决策、DLQ 记录、回滚与对账；数据库迁移步骤 1～2 已执行。真实 RabbitMQ 连通性与故障注入、跨存储崩溃演练、并发压测、集群和 Quorum Queue、部署监控、迁移步骤 3～8、RBAC 管理入口仍未完成。
-
-## 17. 最终背诵页
-
-### 17.1 三个确认
-
-```text
-Confirm：Producer → Broker
-Return：Exchange → Queue 路由失败
-ACK：Consumer → Broker，业务成功后删除投递
-```
-
-### 17.2 四个可靠性支点
-
-```text
-Producer：Outbox + Confirm/Return + attempt 证据
-Broker：durable 拓扑 + persistent 消息 + 部署高可用
-Consumer：事务后 ACK + 幂等 + 唯一索引
-业务：回滚 + DLQ 失败记录 + 对账 + 人工处置
-```
-
-### 17.3 四个不能说
-
-- 不能说 Confirm ACK 代表消费成功。
-- 不能说 durable Queue 保证任何情况下消息不丢。
-- 不能说 RabbitMQ 天然 exactly-once。
-- 不能把单元测试通过说成真实 Broker 和高并发验收完成。
-
-### 17.4 一条判断原则
-
-```text
-先查订单事实
-→ 再查事件状态
-→ 再查全部发送尝试
-→ 有任何可能投递证据就禁止自动回滚
-→ 只有全部明确失败且无订单才允许回滚
-```
-
-## 18. 当前证据边界与参考资料
-
-### 18.1 当前证据
-
-- Java 8 全量源码编译通过。
-- 185 个单元测试通过，覆盖主要状态机、决策、任务和安全修复。
-- 上线迁移步骤 1～2 已于 2026-08-21 在远程环境执行并验证；事件表当时为空。
-- Consumer 默认关闭：`SECKILL_RABBIT_CONSUMER_ENABLED=false`。
-
-尚未完成：
-
-- 真实 RabbitMQ Confirm、Return、DLX 目标不可用等故障注入。
-- Lua 成功后宕机、回滚 Lua 后宕机等跨存储崩溃演练。
-- 重复投递和多实例并发压测。
-- RabbitMQ 集群、Quorum Queue、磁盘和告警验证。
-- 上线迁移步骤 3～8 及小流量验证。
-
-### 18.2 项目事实来源
-
-- 开发规格：[`10-rabbitmq-seckill-reliability-development-spec.md`](../development/10-rabbitmq-seckill-reliability-development-spec.md)
-- 交付报告：[`11-rabbitmq-seckill-reliability-delivery-report.md`](../development/11-rabbitmq-seckill-reliability-delivery-report.md)
-- MQ 配置：[`RabbitMqConfig.java`](../../src/main/java/com/dish/review/config/RabbitMqConfig.java)
-- 运行参数：[`application.yaml`](../../src/main/resources/application.yaml)
-- 事件状态机：[`SeckillOrderEventStateMachine.java`](../../src/main/java/com/dish/review/service/SeckillOrderEventStateMachine.java)
-
-### 18.3 官方资料
-
-- [RabbitMQ Consumer Acknowledgements and Publisher Confirms](https://www.rabbitmq.com/docs/confirms)
-- [RabbitMQ Reliability Guide](https://www.rabbitmq.com/docs/reliability)
-- [RabbitMQ Queues](https://www.rabbitmq.com/docs/queues)
-- [RabbitMQ Dead Letter Exchanges](https://www.rabbitmq.com/docs/dlx)
-- [RabbitMQ Quorum Queues](https://www.rabbitmq.com/docs/quorum-queues)
-- [Spring AMQP 2.2 Reference](https://docs.spring.io/spring-amqp/docs/2.2.x/reference/pdf/index.pdf)
-
-阅读官方文档时始终先确认 RabbitMQ Server、Java Client 和 Spring AMQP 版本，再把语义映射回当前代码。
+1. 为什么 Redis 扣库存后不直接在请求线程发送 MQ？
+2. 本项目的 Outbox 是哪张数据模型，谁扫描它？
+3. 哪个类是唯一实际发送入口？`eventId` 与 `attemptId` 有什么区别？
+4. Confirm ACK、Return、Consumer ACK 各证明了什么，不能证明什么？
+5. Confirm 丢失为什么记 UNKNOWN，而不是直接判失败？
+6. 为什么某次 NACK 不能立即回滚 Redis？
+7. 决策器在什么条件下选择 WAIT、RETRY、ROLLBACK、MARK_CONSUMED？
+8. 基于来源状态的条件更新如何阻止迟到回调覆盖消费成功？
+9. 租约过期解决什么问题？`lease_token` 又解决什么问题？
+10. 消费者如何协调 `ROLLBACK_PENDING`、`ROLLBACK_EXECUTING` 和 `ROLLED_BACK`？
+11. 为什么 MySQL 仍要做 `stock > 0` 的条件扣减？
+12. DLQ 消费者为什么不直接回滚或自动重放？
+13. Redis 已预占但 MySQL 没事件时，哪个模块负责修复？
+14. 哪些结论来自单元测试，哪些仍需要真实 RabbitMQ 环境验证？
+15. 第 8 次发送后事件为什么不立刻转人工？90 秒终局窗口在等什么？
+16. 对账任务如何发现孤儿预留？为什么既要等 30 分钟，又要有 7 天快速回看和每小时全量分页兜底？
+17. Redis 五个预占账本 Key 各做什么？哪个负责发现、哪个提供重建详情、哪个校验回滚归属？
+
+如果这 17 个问题能结合具体类和方法回答，你已经抓住了项目 MQ 代码的主干；其余 Mapper、实体和管理代码可以在排查具体问题时再读。
+
+---
+
+## 18. 官方语义参考
+
+只在源码行为有疑问时查，不建议先通读：
+
+- [RabbitMQ — Consumer Acknowledgements and Publisher Confirms](https://www.rabbitmq.com/docs/confirms)
+- [RabbitMQ — Reliability Guide](https://www.rabbitmq.com/docs/reliability)
+- [Spring AMQP 2.2 Reference](https://docs.spring.io/spring-amqp/docs/2.2.x/reference/html/)
+
+阅读官方文档时始终区分：Broker 发布确认、无法路由退回、消费者处理确认，以及项目自己的业务状态机。这四层不能互相替代。
