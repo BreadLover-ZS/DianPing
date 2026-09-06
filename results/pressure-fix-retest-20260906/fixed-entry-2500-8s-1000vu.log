@@ -1,0 +1,91 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: scripts/seckill-arrival.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 1000 max VUs, 18s max duration (incl. graceful stop):
+              * seckill_arrival: 2500.00 iterations/s for 8s (maxVUs: 1000, gracefulStop: 10s)
+
+
+running (00.9s), 0310/1000 VUs, 2009 complete and 0 interrupted iterations
+seckill_arrival   [  12% ] 0310/1000 VUs  0.9s/8s  2500.00 iters/s
+
+running (01.9s), 0246/1000 VUs, 4571 complete and 0 interrupted iterations
+seckill_arrival   [  24% ] 0246/1000 VUs  1.9s/8s  2500.00 iters/s
+
+running (02.9s), 0254/1000 VUs, 7065 complete and 0 interrupted iterations
+seckill_arrival   [  37% ] 0254/1000 VUs  2.9s/8s  2500.00 iters/s
+
+running (03.9s), 0436/1000 VUs, 9384 complete and 0 interrupted iterations
+seckill_arrival   [  49% ] 0436/1000 VUs  3.9s/8s  2500.00 iters/s
+
+running (04.9s), 0295/1000 VUs, 12024 complete and 0 interrupted iterations
+seckill_arrival   [  62% ] 0295/1000 VUs  4.9s/8s  2500.00 iters/s
+
+running (05.9s), 0322/1000 VUs, 14497 complete and 0 interrupted iterations
+seckill_arrival   [  74% ] 0322/1000 VUs  5.9s/8s  2500.00 iters/s
+
+running (06.9s), 0402/1000 VUs, 16917 complete and 0 interrupted iterations
+seckill_arrival   [  87% ] 0402/1000 VUs  6.9s/8s  2500.00 iters/s
+
+running (07.9s), 0316/1000 VUs, 19503 complete and 0 interrupted iterations
+seckill_arrival   [  99% ] 0316/1000 VUs  7.9s/8s  2500.00 iters/s
+
+
+  █ THRESHOLDS 
+
+    business_accepted
+    ✓ 'rate>0.999' rate=99.99%
+
+    checks
+    ✓ 'rate>0.999' rate=99.99%
+
+    dropped_iterations
+    ✓ 'count==0' count=0
+
+    http_req_failed
+    ✓ 'rate<0.001' rate=0.00%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 40002  4908.869768/s
+    checks_succeeded...: 99.99% 40001 out of 40002
+    checks_failed......: 0.00%  1 out of 40002
+
+    ✓ HTTP 200
+    ✗ business accepted
+      ↳  99% — ✓ 20000 / ✗ 1
+
+    CUSTOM
+    business_accepted..............: 99.99% 20000 out of 20001
+
+    HTTP
+    http_req_duration..............: avg=119.07ms min=86.68ms med=110.26ms max=248.23ms p(90)=152.63ms p(95)=165.81ms
+      { expected_response:true }...: avg=119.07ms min=86.68ms med=110.26ms max=248.23ms p(90)=152.63ms p(95)=165.81ms
+    http_req_failed................: 0.00%  0 out of 20001
+    http_reqs......................: 20001  2454.434884/s
+
+    EXECUTION
+    dropped_iterations.............: 0      0/s
+    iteration_duration.............: avg=119.59ms min=86.94ms med=110.65ms max=249.08ms p(90)=153.64ms p(95)=167.22ms
+    iterations.....................: 20001  2454.434884/s
+    vus............................: 316    min=249            max=435 
+    vus_max........................: 1000   min=1000           max=1000
+
+    NETWORK
+    data_received..................: 3.9 MB 476 kB/s
+    data_sent......................: 3.9 MB 481 kB/s
+
+
+
+
+running (08.1s), 0000/1000 VUs, 20001 complete and 0 interrupted iterations
+seckill_arrival ✓ [ 100% ] 0000/1000 VUs  8s  2500.00 iters/s

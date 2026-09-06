@@ -1,0 +1,485 @@
+TS=1788674563
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 39.1 931032      01:40 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 41.8 939152      01:40 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=5662908416
+TS=1788674565
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 38.3 931032      01:42 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 41.0 939152      01:42 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=5659713536
+TS=1788674567
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 37.6 931032      01:44 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 40.2 939160      01:44 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=5659787264
+TS=1788674569
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 36.9 931032      01:46 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 39.5 939160      01:46 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=5660164096
+TS=1788674571
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 36.3 931032      01:48 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 38.7 939160      01:48 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=5660196864
+TS=1788674573
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 35.6 931032      01:50 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 38.1 939160      01:50 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=5660160000
+TS=1788674575
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 35.0 931032      01:52 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 37.4 939160      01:52 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=5660270592
+TS=1788674577
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 41.4 977724      01:54 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 44.0 1002612     01:54 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=5828382720
+TS=1788674579
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 53.3 1006956     01:56 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 56.5 1046520     01:56 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=5906677760
+TS=1788674582
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 64.5 1078320     01:58 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 67.9 1102596     01:58 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6045933568
+TS=1788674584
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 74.7 1084160     02:01 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 76.9 1108692     02:01 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6060212224
+TS=1788674586
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 84.4 1085900     02:03 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 86.5 1110084     02:03 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6076514304
+TS=1788674588
+   PID %CPU   RSS     ELAPSED CMD
+ 11978 93.5 1124136     02:05 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979 95.8 1171632     02:05 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6198894592
+TS=1788674590
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  102 1126260     02:07 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  104 1175964     02:07 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6210002944
+TS=1788674592
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  110 1137056     02:09 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  112 1179360     02:09 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6224842752
+TS=1788674594
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  117 1161336     02:11 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  118 1192712     02:11 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6276919296
+TS=1788674596
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  123 1161620     02:13 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  124 1195256     02:13 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6286323712
+TS=1788674598
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  127 1175376     02:15 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  129 1205764     02:15 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6328672256
+TS=1788674600
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  132 1155300     02:17 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  133 1205764     02:17 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6319374336
+TS=1788674602
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  136 1165824     02:19 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  137 1207764     02:19 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6353928192
+TS=1788674604
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  140 1155692     02:21 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  142 1208076     02:21 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6358802432
+TS=1788674606
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  144 1160216     02:23 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  146 1215004     02:23 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6381809664
+TS=1788674608
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  148 1161512     02:25 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  150 1216840     02:25 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6398402560
+TS=1788674610
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  151 1162692     02:27 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  154 1217368     02:27 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6405734400
+TS=1788674612
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  155 1164056     02:29 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  158 1218120     02:29 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6422929408
+TS=1788674614
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  158 1164084     02:31 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  161 1219068     02:31 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6431924224
+TS=1788674616
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  162 1164532     02:33 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  165 1219068     02:33 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6446239744
+TS=1788674618
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  164 1164536     02:35 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  168 1219444     02:35 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6456016896
+TS=1788674620
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  167 1164660     02:37 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  171 1219480     02:37 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6465294336
+TS=1788674622
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  167 1164660     02:39 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  170 1218704     02:39 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6459424768
+TS=1788674624
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  165 1164660     02:41 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  168 1171144     02:41 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6414467072
+TS=1788674627
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  163 1164660     02:43 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  166 1171124     02:43 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6405947392
+TS=1788674629
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  161 1164660     02:45 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  164 1171124     02:45 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6405722112
+TS=1788674631
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  159 1164660     02:47 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  162 1171124     02:47 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6405836800
+TS=1788674633
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  157 1164660     02:49 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  161 1171124     02:49 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6406406144
+TS=1788674635
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  155 1164664     02:52 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  158 1171124     02:52 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6409515008
+TS=1788674637
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  153 1164664     02:54 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  156 1171128     02:54 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6406492160
+TS=1788674639
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  151 1164664     02:56 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  154 1171128     02:56 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6405746688
+TS=1788674641
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  149 1164668     02:58 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  152 1171128     02:58 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6405836800
+TS=1788674643
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  148 1164668     03:00 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  151 1171128     03:00 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6405988352
+TS=1788674645
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  148 1165028     03:02 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  151 1174796     03:02 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6456545280
+TS=1788674647
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  151 1165088     03:04 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  153 1175548     03:04 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6484893696
+TS=1788674649
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  153 1165096     03:06 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  155 1176868     03:06 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6493392896
+TS=1788674651
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  156 1165164     03:08 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  156 1176916     03:08 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6501859328
+TS=1788674653
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  158 1166020     03:10 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  158 1176988     03:10 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6518845440
+TS=1788674655
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  159 1166028     03:12 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  159 1181840     03:12 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6532665344
+TS=1788674657
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  160 1166216     03:14 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  160 1181840     03:14 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6538985472
+TS=1788674659
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  162 1166216     03:16 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  162 1182128     03:16 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6549299200
+TS=1788674661
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  164 1167076     03:18 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  163 1182304     03:18 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6552977408
+TS=1788674663
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  165 1183532     03:20 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  164 1182304     03:20 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6583541760
+TS=1788674665
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  166 1183532     03:22 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  165 1198952     03:22 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6621589504
+TS=1788674667
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  167 1185604     03:24 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  166 1198952     03:24 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6628048896
+TS=1788674669
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  168 1185604     03:26 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  168 1198708     03:26 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6637121536
+TS=1788674671
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  169 1185800     03:28 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  169 1198708     03:28 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6646865920
+TS=1788674673
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  170 1185288     03:30 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  170 1198708     03:30 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6652354560
+TS=1788674675
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  170 1185288     03:32 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  169 1198708     03:32 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6646362112
+TS=1788674677
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  168 1185288     03:34 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  167 1198708     03:34 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6645993472
+TS=1788674679
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  167 1185240     03:36 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  166 1198648     03:36 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6638137344
+TS=1788674681
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  165 1185240     03:38 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  165 1198648     03:38 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6637719552
+TS=1788674683
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  164 1185240     03:40 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  163 1198648     03:40 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6637346816
+TS=1788674685
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  162 1185240     03:42 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  162 1198648     03:42 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6637719552
+TS=1788674687
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  161 1185240     03:44 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  160 1198648     03:44 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6637137920
+TS=1788674689
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  159 1185240     03:46 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  159 1198648     03:46 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6637101056
+TS=1788674691
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  158 1185244     03:48 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  157 1198648     03:48 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6637563904
+TS=1788674693
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  157 1185244     03:50 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  156 1198648     03:50 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6637285376
+TS=1788674695
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  155 1185244     03:52 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  155 1198648     03:52 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6639968256
+TS=1788674697
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  154 1185244     03:54 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  153 1198648     03:54 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6638551040
+TS=1788674699
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  153 1185244     03:56 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  152 1198648     03:56 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6638706688
+TS=1788674701
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  151 1185244     03:58 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  151 1198648     03:58 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6638125056
+TS=1788674703
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  150 1185244     04:00 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  149 1198648     04:00 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6637989888
+TS=1788674705
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  149 1185244     04:02 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  148 1198648     04:02 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6637420544
+TS=1788674708
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  150 1185260     04:04 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  150 1197128     04:04 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6675828736
+TS=1788674710
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  151 1185508     04:06 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  151 1197128     04:06 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6688714752
+TS=1788674712
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  152 1182440     04:08 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  153 1198548     04:08 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6692769792
+TS=1788674714
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  154 1182440     04:10 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  154 1198036     04:10 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6704365568
+TS=1788674716
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  153 1182448     04:12 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  154 1198036     04:12 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6691614720
+TS=1788674718
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  152 1182448     04:14 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  152 1198036     04:14 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6683758592
+TS=1788674720
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  150 1182448     04:17 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  151 1198036     04:17 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6684049408
+TS=1788674722
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  149 1182448     04:19 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  149 1198036     04:19 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6682718208
+TS=1788674724
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  147 1182448     04:21 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  148 1198036     04:21 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6682554368
+TS=1788674726
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  146 1182448     04:23 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  147 1198040     04:23 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6682509312
+TS=1788674728
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  145 1182448     04:25 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  146 1198040     04:25 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6680956928
+TS=1788674730
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  144 1182448     04:27 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  145 1198040     04:27 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6680899584
+TS=1788674732
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  143 1182448     04:29 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  144 1198040     04:29 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6680547328
+TS=1788674734
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  142 1182448     04:31 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  143 1198040     04:31 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6680948736
+TS=1788674736
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  141 1182448     04:33 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  142 1198040     04:33 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6681288704
+TS=1788674738
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  140 1182448     04:35 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  141 1198040     04:35 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6680596480
+TS=1788674740
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  139 1182448     04:37 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  140 1198040     04:37 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6680850432
+TS=1788674742
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  138 1182448     04:39 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  139 1198040     04:39 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6681006080
+TS=1788674744
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  137 1182448     04:41 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  138 1198040     04:41 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6680121344
+TS=1788674746
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  136 1182448     04:43 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  137 1198040     04:43 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6680891392
+TS=1788674748
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  135 1182448     04:45 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  136 1198040     04:45 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6680764416
+TS=1788674750
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  134 1182448     04:47 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  135 1198040     04:47 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6680821760
+TS=1788674752
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  133 1182448     04:49 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  134 1198040     04:49 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6681296896
+TS=1788674754
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  132 1182448     04:51 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  133 1198040     04:51 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6680584192
+TS=1788674756
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  131 1182448     04:53 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  132 1198040     04:53 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6681673728
+TS=1788674758
+   PID %CPU   RSS     ELAPSED CMD
+ 11978  131 1182448     04:55 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+ 11979  131 1198040     04:55 java -Xms512m -Xmx2g -jar target/dish-review-fixed-9571209.jar
+MEM=6684975104
