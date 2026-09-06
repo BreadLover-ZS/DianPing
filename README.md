@@ -33,24 +33,21 @@ DianPing 是一个基于 Java 8 与 Spring Boot 的餐饮点评项目，包含�
 
 秒杀接口返回的是“请求已受理”，正式订单由消息消费者异步创建。`eventId` 和 `orderId` 在进入 Lua 前生成，并在预留、发布、消费、对账和回滚阶段始终复用，使一次业务请求能够跨 Redis、MySQL 和 RabbitMQ 被持续追踪。
 
-```mermaid
-flowchart LR
-    A[秒杀请求] --> B[Redis Lua 原子预留]
-    B --> C[MySQL 写入 PENDING 事件]
-    C --> D[Outbox 任务发布消息]
-    D --> E[RabbitMQ Confirm / Return]
-    D --> F[消费者事务创建订单]
-    F --> G[MySQL 订单与库存]
-    F --> H[清理 Redis 预留]
-    E --> I[失败决策与重试]
-    I --> D
-    I --> J[库存回滚]
-    I --> K[人工处理]
-    B --> L[Redis / MySQL 对账]
-    L --> C
-    L --> H
-    L --> K
-```
+### 核心流程
+
+为便于查看关键分支，秒杀链路拆分为消息发布、消费落单和库存回滚三个流程。
+
+#### Outbox 发布与失败决策
+
+![Outbox 发布、Publisher Confirm、重试与失败决策流程](docs/images/seckill/outbox-publish-flow.png)
+
+#### 消费落单与幂等处理
+
+![RabbitMQ 消费、订单幂等校验与事件状态收敛流程](docs/images/seckill/order-consume-flow.png)
+
+#### Redis 预留回滚与人工收敛
+
+![Redis 预留回滚、退避重试与人工处理流程](docs/images/seckill/reservation-rollback-flow.png)
 
 ### 1. 请求受理：Redis 原子预留
 
