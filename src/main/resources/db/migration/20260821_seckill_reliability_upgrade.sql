@@ -5,7 +5,7 @@
 -- 1. 事件表扩展：回滚计数、任务租约、行版本、稳定错误码和终态时间
 ALTER TABLE tb_seckill_order_event
     ADD COLUMN rollback_retry_count int(10) UNSIGNED NOT NULL DEFAULT 0 COMMENT '回滚执行次数',
-    ADD COLUMN lease_owner          varchar(64)          DEFAULT NULL COMMENT '当前任务实例',
+    ADD COLUMN lease_owner          varchar(128)         DEFAULT NULL COMMENT '当前任务实例',
     ADD COLUMN lease_until          timestamp NULL       DEFAULT NULL COMMENT '任务租约到期时间',
     ADD COLUMN lease_token          bigint(20) UNSIGNED NOT NULL DEFAULT 0 COMMENT '每次抢占生成的 fencing token',
     ADD COLUMN row_version          bigint(20) UNSIGNED NOT NULL DEFAULT 0 COMMENT '行版本',

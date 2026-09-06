@@ -602,15 +602,16 @@ public class SeckillOrderEventService {
     /**
      * 查询尚未完成 Redis 预留清理的 CONSUMED 事件。
      * 按终态时间和事件 ID 升序分批扫描，避免旧事件长期饥饿。
+     *
+     * <p>完成标记已经提供了稳定游标，因此不按时间截断结果，避免积压事件
+     * 超过窗口后永久漏扫。</p>
      */
     public List<SeckillOrderEvent> findConsumedAwaitingReservationCompletion(
-            int withinMinutes, int limit) {
+            int limit) {
         QueryWrapper<SeckillOrderEvent> query = new QueryWrapper<>();
 
         query.eq("status", SeckillOrderEvent.STATUS_CONSUMED)
                 .isNull("reservation_completed_at")
-                .apply("consumed_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL "
-                        + withinMinutes + " MINUTE)")
                 .orderByAsc("consumed_at", "event_id")
                 .last("LIMIT " + safeLimit(limit));
 

@@ -93,7 +93,7 @@ class SeckillOrderReconciliationTaskTests {
                 .thenReturn(Collections.emptySet());
         when(luaExecutor.moveReservationToManual(anyLong(), anyString()))
                 .thenReturn(1L);
-        when(eventService.findConsumedAwaitingReservationCompletion(anyInt(), anyInt()))
+        when(eventService.findConsumedAwaitingReservationCompletion(anyInt()))
                 .thenReturn(Collections.emptyList());
         when(eventService.findRolledBackRecent(anyInt(), anyInt()))
                 .thenReturn(Collections.emptyList());
@@ -303,7 +303,7 @@ class SeckillOrderReconciliationTaskTests {
 
     @Test
     void consumedEventCompletesReservation() {
-        when(eventService.findConsumedAwaitingReservationCompletion(60, 100))
+        when(eventService.findConsumedAwaitingReservationCompletion(100))
                 .thenReturn(Collections.singletonList(
                         event(SeckillOrderEvent.STATUS_CONSUMED)))
                 .thenReturn(Collections.emptyList());
@@ -331,7 +331,7 @@ class SeckillOrderReconciliationTaskTests {
         SeckillOrderEvent third = event(SeckillOrderEvent.STATUS_CONSUMED);
         third.setEventId("event-3");
 
-        when(eventService.findConsumedAwaitingReservationCompletion(60, 2))
+        when(eventService.findConsumedAwaitingReservationCompletion(2))
                 .thenReturn(java.util.Arrays.asList(first, second))
                 .thenReturn(Collections.singletonList(third))
                 .thenReturn(Collections.emptyList());
@@ -343,7 +343,7 @@ class SeckillOrderReconciliationTaskTests {
         assertDoesNotThrow(() -> task.reconcile());
 
         verify(eventService, times(2))
-                .findConsumedAwaitingReservationCompletion(60, 2);
+                .findConsumedAwaitingReservationCompletion(2);
         verify(eventService).markReservationCompleted("event-1");
         verify(eventService).markReservationCompleted("event-2");
         verify(eventService).markReservationCompleted("event-3");
@@ -351,7 +351,7 @@ class SeckillOrderReconciliationTaskTests {
 
     @Test
     void completeReservationConflictRecordsFailure() {
-        when(eventService.findConsumedAwaitingReservationCompletion(60, 100))
+        when(eventService.findConsumedAwaitingReservationCompletion(100))
                 .thenReturn(Collections.singletonList(
                         event(SeckillOrderEvent.STATUS_CONSUMED)))
                 .thenReturn(Collections.emptyList());

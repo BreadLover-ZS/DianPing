@@ -2,7 +2,7 @@
 
 DianPing 是一个基于 Java 8 与 Spring Boot 的餐饮点评项目，包含用户登录、商铺查询、探店内容、社交关系、签到和优惠券等业务。在原有点评场景上，项目的主要工程实践集中在**优惠券秒杀链路的异步化与可靠性治理**：从 Redis 原子预留、MySQL 事件账本、RabbitMQ 异步下单，到失败重试、幂等消费、库存回滚、数据对账和人工兜底，形成可追踪的业务闭环。
 
-> 当前结论以仓库代码和自动化测试为准。项目尚未完成真实 RabbitMQ 故障注入、多实例宕机恢复和并发压力测试，因此不声明生产级吞吐、消息零丢失或零超卖。
+> 当前结论以仓库代码、自动化测试和 2026-09-06 隔离环境压测为准。项目已完成双实例短时容量阶梯与全链路一致性验收，但尚未完成真实 RabbitMQ 故障注入、多实例宕机恢复和长时间稳定性测试，因此不声明生产级吞吐、消息零丢失或零超卖。
 
 ## 项目功能
 
@@ -198,6 +198,7 @@ mysql -u root -p dish_review < src/main/resources/db/migration/20260822_add_seck
 mysql -u root -p dish_review < src/main/resources/db/migration/20260823_add_late_confirm_evidence.sql
 mysql -u root -p dish_review < src/main/resources/db/migration/20260823_add_query_indexes.sql
 mysql -u root -p dish_review < src/main/resources/db/migration/20260823_add_user_role.sql
+mysql -u root -p dish_review < src/main/resources/db/migration/20260906_add_seckill_reservation_completion_marker.sql
 ```
 
 ### 2. 配置依赖
@@ -259,13 +260,32 @@ export SECKILL_TASKS_ENABLED=true
 | MySQL 迁移脚本 | 已有脚本与既有环境执行记录 |
 | 真实 RabbitMQ 故障注入 | 待验证 |
 | 多实例宕机恢复与跨存储故障窗口 | 待验证 |
-| 并发压力测试及吞吐、延迟、资源曲线 | 待补充 |
+| 双实例短时容量阶梯 | 已完成；300 QPS 为当前最高通过档，500 QPS 失败 |
+| 秒杀全链路最终一致性 | 已验收；37,177 个事件全部收敛且 Redis/MQ 无残留 |
+| 10 分钟以上稳定性与恢复时延 | 待验证 |
 
-后续压力测试将重点验证库存正确性、一人一单、重复投递幂等、消息堆积恢复、数据库竞争以及 P95/P99 延迟。取得可复现数据后，再在本节补充测试环境、并发模型、结果和瓶颈分析。
+### 压力测试结果（2026-09-06）
+
+本轮使用一台 AutoDL 压测机，经单条 SSH 隧道访问另一台 AutoDL 目标机上的两个应用实例；MySQL、Redis 和 RabbitMQ 使用隔离测试环境。测试采用不同用户 Token 的恒定到达率模型，每个有效档位使用不重叠的 Token 区间。
+
+| 目标速率 | 时长 | 完成请求 | 实际速率 | HTTP 失败 | 业务受理 | 丢迭代 | p95 | 结论 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 50 QPS | 30 s | 1,500 | 49.96 QPS | 0 | 100% | 0 | 40.57 ms | 通过 |
+| 100 QPS | 30 s | 3,001 | 99.87 QPS | 0 | 100% | 0 | 22.81 ms | 通过 |
+| 200 QPS | 30 s | 6,001 | 199.74 QPS | 0 | 100% | 0 | 16.13 ms | 通过 |
+| 300 QPS | 30 s | 9,001 | 299.56 QPS | 0 | 100% | 0 | 16.73 ms | 通过 |
+| 500 QPS | 30 s | 14,409 | 360.16 QPS | 4.04% | 95.95% | 93 | 17.09 ms* | 失败 |
+
+`*` 500 QPS 档最大耗时达到 28.43 秒，因此 p95 不能单独代表该档健康。
+
+最终验收中，券 11 的 37,177 个事件全部进入 `CONSUMED`，正式订单数同为 37,177，MySQL 剩余库存 82,823；Redis 预留结构、RabbitMQ 主队列和 DLQ 均已清空。300 QPS 是当前拓扑下**30 秒短时测试的最高通过档位**，不是生产容量承诺；500 QPS 失败后的积压还需要临时调高恢复参数才能清空，默认配置下的恢复时延仍需专项验证。
+
+详细测试环境、失败边界、全链路验收和原始数据说明见[秒杀双机压测与容量边界报告](docs/development/16-seckill-capacity-test-report-20260906.md)。可复现脚本位于 `scripts/pressure/`，保留的有效原始数据位于 `results/pressure-capacity-20260906/`。
 
 ## 延伸文档
 
 - [RabbitMQ 秒杀可靠性开发规格](docs/development/10-rabbitmq-seckill-reliability-development-spec.md)
 - [RabbitMQ 秒杀可靠性交付记录](docs/development/11-rabbitmq-seckill-reliability-delivery-report.md)
+- [秒杀双机压测与容量边界报告（2026-09-06）](docs/development/16-seckill-capacity-test-report-20260906.md)
 - [秒杀完整调用链](docs/learning/09-rabbitmq-seckill-flow.md)
 - [项目学习与二次开发指南](docs/learning/08-interview-and-secondary-development-guide.md)

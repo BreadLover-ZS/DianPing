@@ -1,0 +1,155 @@
+{
+    "metrics": {
+        "http_req_connecting": {
+            "avg": 0.02709917333333333,
+            "min": 0,
+            "med": 0,
+            "max": 21.065236,
+            "p(90)": 0,
+            "p(95)": 0.1577358
+        },
+        "data_sent": {
+            "count": 294000,
+            "rate": 9792.492366049322
+        },
+        "http_req_duration": {
+            "min": 19.939207,
+            "med": 21.4800775,
+            "max": 200.819515,
+            "p(90)": 22.8879014,
+            "p(95)": 40.5663875,
+            "avg": 23.05380204333333
+        },
+        "http_req_sending": {
+            "p(90)": 0.039546899999999996,
+            "p(95)": 0.08983884999999998,
+            "avg": 0.038089694666666625,
+            "min": 0.016388,
+            "med": 0.034714,
+            "max": 0.202407
+        },
+        "vus_max": {
+            "value": 100,
+            "min": 100,
+            "max": 100
+        },
+        "http_req_tls_handshaking": {
+            "p(95)": 0,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "max": 0,
+            "p(90)": 0
+        },
+        "http_req_blocked": {
+            "max": 21.177068,
+            "p(90)": 0.011282600000000002,
+            "p(95)": 0.26258679999999995,
+            "avg": 0.04394336066666666,
+            "min": 0.004721,
+            "med": 0.0096435
+        },
+        "business_accepted": {
+            "passes": 1500,
+            "fails": 0,
+            "thresholds": {
+                "rate==1": false
+            },
+            "value": 1
+        },
+        "vus": {
+            "value": 1,
+            "min": 1,
+            "max": 2
+        },
+        "http_req_waiting": {
+            "med": 21.35764,
+            "max": 200.622039,
+            "p(90)": 22.7404045,
+            "p(95)": 34.52892255,
+            "avg": 22.63845381066664,
+            "min": 13.927136
+        },
+        "http_req_receiving": {
+            "avg": 0.37725853799999987,
+            "min": 0.037877,
+            "med": 0.090188,
+            "max": 25.971386,
+            "p(90)": 0.1074055,
+            "p(95)": 0.13560879999999984
+        },
+        "dropped_iterations": {
+            "count": 0,
+            "rate": 0,
+            "thresholds": {
+                "count==0": false
+            }
+        },
+        "iteration_duration": {
+            "avg": 23.47664923200001,
+            "min": 20.535089,
+            "med": 21.873528,
+            "max": 202.318988,
+            "p(90)": 23.323780300000003,
+            "p(95)": 41.2761823
+        },
+        "http_req_duration{expected_response:true}": {
+            "p(90)": 22.8879014,
+            "p(95)": 40.5663875,
+            "avg": 23.05380204333333,
+            "min": 19.939207,
+            "med": 21.4800775,
+            "max": 200.819515
+        },
+        "iterations": {
+            "count": 1500,
+            "rate": 49.961695745149605
+        },
+        "checks": {
+            "passes": 3000,
+            "fails": 0,
+            "thresholds": {
+                "rate==1": false
+            },
+            "value": 1
+        },
+        "http_reqs": {
+            "count": 1500,
+            "rate": 49.961695745149605
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 1500,
+            "thresholds": {
+                "rate<0.001": false
+            },
+            "value": 0
+        },
+        "data_received": {
+            "count": 291000,
+            "rate": 9692.568974559024
+        }
+    },
+    "root_group": {
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "HTTP 200": {
+                    "fails": 0,
+                    "name": "HTTP 200",
+                    "path": "::HTTP 200",
+                    "id": "b70aee8a9f7a77d66dd70844a901558a",
+                    "passes": 1500
+                },
+                "business accepted": {
+                    "path": "::business accepted",
+                    "id": "bc6da676f0b831ea92c38f5799c11bca",
+                    "passes": 1500,
+                    "fails": 0,
+                    "name": "business accepted"
+                }
+            }
+    }
+}

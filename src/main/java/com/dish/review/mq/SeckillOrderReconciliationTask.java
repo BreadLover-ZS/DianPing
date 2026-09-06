@@ -401,7 +401,7 @@ public class SeckillOrderReconciliationTask {
 
             try {
                 events = eventService.findConsumedAwaitingReservationCompletion(
-                        eventWindowMinutes, eventBatchSize);
+                        eventBatchSize);
             } catch (Exception exception) {
                 log.error("对账任务查询 CONSUMED 事件失败", exception);
                 return;
