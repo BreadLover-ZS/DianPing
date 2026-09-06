@@ -28,6 +28,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -74,6 +75,8 @@ class SeckillOrderReconciliationTaskTests {
         ReflectionTestUtils.setField(
                 task, "eventBatchSize", 100);
         ReflectionTestUtils.setField(
+                task, "eventMaxBatchesPerRun", 20);
+        ReflectionTestUtils.setField(
                 task, "rollbackStuckMinutes", 10);
         ReflectionTestUtils.setField(
                 task, "publishUnknownMaxHours", 24);
@@ -90,7 +93,7 @@ class SeckillOrderReconciliationTaskTests {
                 .thenReturn(Collections.emptySet());
         when(luaExecutor.moveReservationToManual(anyLong(), anyString()))
                 .thenReturn(1L);
-        when(eventService.findConsumedRecent(anyInt(), anyInt()))
+        when(eventService.findConsumedAwaitingReservationCompletion(anyInt(), anyInt()))
                 .thenReturn(Collections.emptyList());
         when(eventService.findRolledBackRecent(anyInt(), anyInt()))
                 .thenReturn(Collections.emptyList());
@@ -300,23 +303,58 @@ class SeckillOrderReconciliationTaskTests {
 
     @Test
     void consumedEventCompletesReservation() {
-        when(eventService.findConsumedRecent(60, 100))
+        when(eventService.findConsumedAwaitingReservationCompletion(60, 100))
                 .thenReturn(Collections.singletonList(
-                        event(SeckillOrderEvent.STATUS_CONSUMED)));
+                        event(SeckillOrderEvent.STATUS_CONSUMED)))
+                .thenReturn(Collections.emptyList());
         when(luaExecutor.completeReservation(10L, 7L, "event-1", 100L))
                 .thenReturn(1L);
+        when(eventService.markReservationCompleted("event-1"))
+                .thenReturn(true);
 
         assertDoesNotThrow(() -> task.reconcile());
 
         verify(luaExecutor).completeReservation(10L, 7L, "event-1", 100L);
+        verify(eventService).markReservationCompleted("event-1");
         verify(failureCaseService, never()).recordFailure(any());
     }
 
     @Test
+    void consumedEventsAreProcessedAcrossMultipleBatches() {
+        ReflectionTestUtils.setField(task, "eventBatchSize", 2);
+        ReflectionTestUtils.setField(task, "eventMaxBatchesPerRun", 3);
+
+        SeckillOrderEvent first = event(SeckillOrderEvent.STATUS_CONSUMED);
+        first.setEventId("event-1");
+        SeckillOrderEvent second = event(SeckillOrderEvent.STATUS_CONSUMED);
+        second.setEventId("event-2");
+        SeckillOrderEvent third = event(SeckillOrderEvent.STATUS_CONSUMED);
+        third.setEventId("event-3");
+
+        when(eventService.findConsumedAwaitingReservationCompletion(60, 2))
+                .thenReturn(java.util.Arrays.asList(first, second))
+                .thenReturn(Collections.singletonList(third))
+                .thenReturn(Collections.emptyList());
+        when(luaExecutor.completeReservation(anyLong(), anyLong(), anyString(), anyLong()))
+                .thenReturn(1L);
+        when(eventService.markReservationCompleted(anyString()))
+                .thenReturn(true);
+
+        assertDoesNotThrow(() -> task.reconcile());
+
+        verify(eventService, times(2))
+                .findConsumedAwaitingReservationCompletion(60, 2);
+        verify(eventService).markReservationCompleted("event-1");
+        verify(eventService).markReservationCompleted("event-2");
+        verify(eventService).markReservationCompleted("event-3");
+    }
+
+    @Test
     void completeReservationConflictRecordsFailure() {
-        when(eventService.findConsumedRecent(60, 100))
+        when(eventService.findConsumedAwaitingReservationCompletion(60, 100))
                 .thenReturn(Collections.singletonList(
-                        event(SeckillOrderEvent.STATUS_CONSUMED)));
+                        event(SeckillOrderEvent.STATUS_CONSUMED)))
+                .thenReturn(Collections.emptyList());
         when(luaExecutor.completeReservation(10L, 7L, "event-1", 100L))
                 .thenReturn(-2L);
 
@@ -331,6 +369,7 @@ class SeckillOrderReconciliationTaskTests {
                 "complete_reservation_conflict",
                 captor.getValue().getErrorCode()
         );
+        verify(eventService, never()).markReservationCompleted("event-1");
     }
 
     @Test

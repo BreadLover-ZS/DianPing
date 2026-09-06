@@ -110,6 +110,7 @@ dish-review:
       reservation-batch-size: ${SECKILL_RECONCILE_RESERVATION_BATCH_SIZE:50}
       event-window-minutes: ${SECKILL_RECONCILE_EVENT_WINDOW_MINUTES:60}
       event-batch-size: ${SECKILL_RECONCILE_EVENT_BATCH_SIZE:100}
+      event-max-batches-per-run: ${SECKILL_RECONCILE_EVENT_MAX_BATCHES_PER_RUN:20}
       rollback-stuck-minutes: ${SECKILL_RECONCILE_ROLLBACK_STUCK_MINUTES:10}
       publish-unknown-max-hours: ${SECKILL_RECONCILE_PUBLISH_UNKNOWN_MAX_HOURS:24}
       # 快速扫描的券结束时间回看窗口（天）；窗口外历史券由安全兜底扫描覆盖

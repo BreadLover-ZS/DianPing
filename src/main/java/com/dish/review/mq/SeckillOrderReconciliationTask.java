@@ -76,6 +76,10 @@ public class SeckillOrderReconciliationTask {
     @Value("${dish-review.seckill.reconcile.event-batch-size:100}")
     private int eventBatchSize;
 
+    /** 单轮最多扫描的 CONSUMED 事件批次数，避免故障时长期占用调度线程。 */
+    @Value("${dish-review.seckill.reconcile.event-max-batches-per-run:20}")
+    private int eventMaxBatchesPerRun;
+
     /**
      * ROLLBACK_EXECUTING 卡死判定的分钟数。
      */
@@ -390,48 +394,81 @@ public class SeckillOrderReconciliationTask {
      * CONSUMED 事件执行预留完成脚本（幂等）。
      */
     private void reconcileConsumedEvents() {
-        List<SeckillOrderEvent> events;
+        int maxBatches = Math.max(1, eventMaxBatchesPerRun);
 
-        try {
-            events = eventService.findConsumedRecent(
-                    eventWindowMinutes, eventBatchSize);
-        } catch (Exception exception) {
-            log.error("对账任务查询 CONSUMED 事件失败", exception);
-            return;
+        for (int batch = 0; batch < maxBatches; batch++) {
+            List<SeckillOrderEvent> events;
+
+            try {
+                events = eventService.findConsumedAwaitingReservationCompletion(
+                        eventWindowMinutes, eventBatchSize);
+            } catch (Exception exception) {
+                log.error("对账任务查询 CONSUMED 事件失败", exception);
+                return;
+            }
+
+            if (events.isEmpty()) {
+                return;
+            }
+
+            for (SeckillOrderEvent event : events) {
+                reconcileConsumedEvent(event);
+            }
+
+            if (events.size() < Math.max(1, Math.min(eventBatchSize, 100))) {
+                return;
+            }
         }
 
-        for (SeckillOrderEvent event : events) {
-            try {
-                Long result = luaExecutor.completeReservation(
-                        event.getVoucherId(),
-                        event.getUserId(),
-                        event.getEventId(),
-                        event.getOrderId()
-                );
+        log.warn(
+                "对账任务达到单轮 CONSUMED 扫描上限，下一轮继续处理，maxBatches={}",
+                maxBatches
+        );
+    }
 
-                if (Long.valueOf(1L).equals(result)) {
-                    log.warn(
-                            "对账补执行预留完成（消费侧清理缺失），"
-                                    + "eventId={}，voucherId={}",
-                            event.getEventId(),
-                            event.getVoucherId()
-                    );
-                }
-                // 0 幂等成功；-2 事件冲突需要人工关注
-                if (Long.valueOf(-2L).equals(result)) {
-                    recordReconcileConflict(
-                            event,
-                            "complete_reservation_conflict",
-                            "预留完成脚本报告事件冲突（映射指向其他事件）"
-                    );
-                }
-            } catch (Exception exception) {
-                log.error(
-                        "对账执行预留完成脚本失败，eventId={}",
+    /** 执行单个 CONSUMED 事件的 Redis 清理并持久化完成标记。 */
+    private void reconcileConsumedEvent(SeckillOrderEvent event) {
+        try {
+            Long result = luaExecutor.completeReservation(
+                    event.getVoucherId(),
+                    event.getUserId(),
+                    event.getEventId(),
+                    event.getOrderId()
+            );
+
+            if (Long.valueOf(1L).equals(result)) {
+                log.warn(
+                        "对账补执行预留完成（消费侧清理缺失），eventId={}，voucherId={}",
                         event.getEventId(),
-                        exception
+                        event.getVoucherId()
                 );
             }
+
+            // 0 表示 Redis 侧已经完成，和 1 一样属于幂等成功。
+            if (Long.valueOf(0L).equals(result)
+                    || Long.valueOf(1L).equals(result)) {
+                if (!eventService.markReservationCompleted(event.getEventId())) {
+                    log.error(
+                            "对账已完成 Redis 清理但无法写入完成标记，eventId={}",
+                            event.getEventId()
+                    );
+                }
+            }
+
+            // -2 事件冲突需要人工关注，不能标记为完成。
+            if (Long.valueOf(-2L).equals(result)) {
+                recordReconcileConflict(
+                        event,
+                        "complete_reservation_conflict",
+                        "预留完成脚本报告事件冲突（映射指向其他事件）"
+                );
+            }
+        } catch (Exception exception) {
+            log.error(
+                    "对账执行预留完成脚本失败，eventId={}",
+                    event.getEventId(),
+                    exception
+            );
         }
     }
 

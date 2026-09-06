@@ -600,20 +600,43 @@ public class SeckillOrderEventService {
     }
 
     /**
-     * 查询最近进入 CONSUMED 的事件（对账任务执行预留完成脚本）。
-     * 按终态时间倒序分批扫描，幂等执行不产生副作用。
+     * 查询尚未完成 Redis 预留清理的 CONSUMED 事件。
+     * 按终态时间和事件 ID 升序分批扫描，避免旧事件长期饥饿。
      */
-    public List<SeckillOrderEvent> findConsumedRecent(
+    public List<SeckillOrderEvent> findConsumedAwaitingReservationCompletion(
             int withinMinutes, int limit) {
         QueryWrapper<SeckillOrderEvent> query = new QueryWrapper<>();
 
         query.eq("status", SeckillOrderEvent.STATUS_CONSUMED)
+                .isNull("reservation_completed_at")
                 .apply("consumed_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL "
                         + withinMinutes + " MINUTE)")
-                .orderByDesc("consumed_at")
+                .orderByAsc("consumed_at", "event_id")
                 .last("LIMIT " + safeLimit(limit));
 
         return eventMapper.selectList(query);
+    }
+
+    /**
+     * 标记 Redis 预留完成脚本已执行。并发实例重复标记按幂等成功处理。
+     */
+    public boolean markReservationCompleted(String eventId) {
+        UpdateWrapper<SeckillOrderEvent> update = new UpdateWrapper<>();
+
+        update.setSql("reservation_completed_at = CURRENT_TIMESTAMP")
+                .eq("event_id", eventId)
+                .eq("status", SeckillOrderEvent.STATUS_CONSUMED)
+                .isNull("reservation_completed_at");
+
+        if (eventMapper.update(null, update) == 1) {
+            return true;
+        }
+
+        SeckillOrderEvent existing = eventMapper.selectById(eventId);
+
+        return existing != null
+                && existing.getStatus() == SeckillOrderEvent.STATUS_CONSUMED
+                && existing.getReservationCompletedAt() != null;
     }
 
     /**

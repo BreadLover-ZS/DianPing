@@ -57,6 +57,9 @@ public class SeckillOrderEvent implements Serializable {
     /** 订单完成时间。 */
     private LocalDateTime consumedAt;
 
+    /** Redis 预留完成脚本已执行的时间。 */
+    private LocalDateTime reservationCompletedAt;
+
     /** 终态时间（CONSUMED/ROLLED_BACK/MANUAL_REVIEW）。 */
     private LocalDateTime terminalAt;
 
