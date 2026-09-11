@@ -285,4 +285,5 @@ export SECKILL_TASKS_ENABLED=true
 - [RabbitMQ 秒杀可靠性交付记录](docs/development/11-rabbitmq-seckill-reliability-delivery-report.md)
 - [秒杀双机压测与容量边界报告（2026-09-06）](docs/development/16-seckill-capacity-test-report-20260906.md)
 - [秒杀完整调用链](docs/learning/09-rabbitmq-seckill-flow.md)
+- [技术面试 系统设计与业务逻辑要点](docs/learning/10-interview-system-design-notes.md)
 - [项目学习与二次开发指南](docs/learning/08-interview-and-secondary-development-guide.md)
